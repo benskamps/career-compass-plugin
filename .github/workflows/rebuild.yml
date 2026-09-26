@@ -1,0 +1,51 @@
+name: Rebuild from a career-compass-mcp release
+
+# Run this after each npm release of career-compass-mcp. It rebuilds server/ from the
+# published package and opens a pull request. Merging that pull request is what sends
+# the new version to the Claude directory.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact career-compass-mcp version to bundle, e.g. 2.9.3"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm i --no-save --no-audit --no-fund esbuild@0.28.2
+      - run: node .github/scripts/build-bundle.mjs "${{ inputs.version }}"
+      - name: Smoke-test the bundled server
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            | HOME="$RUNNER_TEMP" timeout 20 node server/build/src/index.js > out.jsonl || true
+          count=$(grep '"id":2' out.jsonl | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).result.tools.length))')
+          echo "tools: $count"
+          test "$count" -eq 18
+          rm out.jsonl
+      - name: Open a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "bundle/v$VERSION"
+          git add -A
+          git commit -m "Bundle career-compass-mcp $VERSION"
+          git push -u origin "bundle/v$VERSION"
+          gh pr create --title "Bundle career-compass-mcp $VERSION" \
+            --body "Rebuilt server/ from career-compass-mcp@$VERSION on npm. See BUNDLE.md."

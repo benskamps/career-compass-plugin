@@ -1,0 +1,21 @@
+{
+  "name": "career-compass-mcp",
+  "version": "2.9.3",
+  "description": "AI-native career co-pilot for Claude — Career KB, resume tailoring, job pipeline, interview prep, and offer evaluation via MCP",
+  "type": "module",
+  "main": "build/src/index.js",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/benskamps/career-compass-mcp.git"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  },
+  "private": true
+}
