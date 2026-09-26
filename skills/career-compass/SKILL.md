@@ -17,7 +17,7 @@ Node.js 22 or newer. Say so plainly rather than improvising the tools' output.
 
 When the user is new, or something seems off, call `check_setup` first. It reports the data
 folder, which KB sections are filled in, and whether the pipeline parses. It stays offline
-by default. Set `checkForUpdates: true` only when the user asks about updates or versions;
+by default. Pass `checkForUpdates: true` only when the user asks about updates or versions;
 that makes one request to the public npm registry.
 
 ## Build the Career KB before using it
@@ -37,7 +37,7 @@ Never invent achievements, dates, or metrics. If the KB lacks something a résum
 
 | The user wants to | Use |
 |---|---|
-| Know whether a posting fits | `explore_opportunity` (give the job board's own fit label as `sourceFitLabel` when they have it) |
+| Know whether a posting fits | `explore_opportunity` (pass the job board's own fit label as `sourceFitLabel` when they have it) |
 | Learn about a company | `research_company` |
 | Apply | `tailor_resume`, then `generate_cover_letter`; `format_for_ats` for a specific ATS |
 | Track an application | `pipeline_add` for a new one, `pipeline_update` to change status, notes, follow-ups, contacts, or interview rounds |
@@ -45,7 +45,7 @@ Never invent achievements, dates, or metrics. If the KB lacks something a résum
 | Make sense of a recruiter email | `classify_email`, then offer the pipeline update it suggests |
 | Prepare for an interview | `prepare_interview`; mid-process, `interview_arc` to project the next round |
 | Weigh an offer | `evaluate_offer` |
-| Decline or respond to a rejection | `generate_rejection_response` (include `applicationId` to mark it rejected) |
+| Decline or respond to a rejection | `generate_rejection_response` (pass `applicationId` to mark it rejected) |
 | Remember something that matters | `capture_insight` after interviews, offers, and rejections |
 | Prove work from a local project | `harvest_evidence` on that project's folder |
 

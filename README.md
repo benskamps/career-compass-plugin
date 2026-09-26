@@ -55,7 +55,8 @@ Full documentation: <https://github.com/benskamps/career-compass-mcp#readme>
 ## Privacy Policy
 
 Your data stays on your machine. Career Compass stores your career knowledge base and job
-pipeline as YAML in `~/.career-compass/`. It sends that data nowhere on its own: it is passed only to
+pipeline as YAML in `~/.career-compass/`, or in the folder you choose in the plugin's
+**Career data folder** setting. It sends that data nowhere on its own: it is passed only to
 the Claude client you use, and only for the requests you make. When you ask
 `harvest_evidence` to look at a project folder, it reads that folder's git history locally
 and writes nothing.
@@ -79,8 +80,7 @@ policy, covering collection, storage, sharing, retention, and contact details, i
 The code in `server/` is the compiled output of
 [career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.9.3, plus the files the
 server loads from its runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `yaml`, and
-what they depend on), copied as published except for two removed debug lines in `yaml`.
-`BUNDLE.md` lists where each file came from and what changed.
+what they depend on), copied unmodified. `BUNDLE.md` lists where each file came from and how to rebuild it.
 
 ## License
 

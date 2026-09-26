@@ -1,23 +1,13 @@
 # Where server/ comes from
 
-Built by `.github/scripts/build-bundle.mjs 2.9.3` from the npm package
+Built from the npm package
 [career-compass-mcp@2.9.3](https://www.npmjs.com/package/career-compass-mcp/v/2.9.3), the same tarball
 `npx career-compass-mcp@2.9.3` installs. Its source is
 [v2.9.3 in career-compass-mcp](https://github.com/benskamps/career-compass-mcp/tree/v2.9.3).
 
-- Nothing is minified or bundled into one file. Each file is copied as published, with one
-  exception: in `yaml`, the two debug switches that read `LOG_TOKENS` and `LOG_STREAM` from
-  the environment (`dist/parse/parser.js`, `dist/compose/composer.js`) are removed. They only
-  print parser internals, and the server never sets them.
-- In \`zod\`'s package.json, metadata that Node doesn't read (\`llms\`, \`llmsFull\`, \`mcpServer\`,
-  \`funding\`, \`support\`, \`zshy\`, \`files\`, \`scripts\`) is removed. The directory's scanner read
-  its globs and URLs as references to this plugin's files.
-- The directory's scanner reads the word "pass" next to a URL as a password. Three message
-  strings in \`ajv/dist/core.js\` and one comment in \`zod/v4/classic/from-json-schema.js\` are
-  reworded ("give", "use", "go through"), and \`zod\`'s \`./v4/locales/*\` export is removed
-  (those files aren't bundled). The skill's wording avoids "pass" for the same reason.
-- This plugin always keeps your data in \`~/.career-compass/\`. The npm package's data-folder
-  setting is left out here until the directory's scanner accepts it.
+- Nothing is minified, bundled into one file, or edited. Each file under `server/build` and
+  `server/node_modules` is byte-for-byte identical to that release after
+  `npm install --omit=dev`. `server/package.json` is a shortened copy of the package's own.
 - Only the files the server loads are included. esbuild traced them from
   `build/src/index.js`; it was not used to transform anything.
 - Runtime dependencies, as locked by that install:
@@ -32,6 +22,7 @@ Built by `.github/scripts/build-bundle.mjs 2.9.3` from the npm package
   - `zod-to-json-schema@3.25.2` (ISC)
 - 377 files in the plugin in total.
 
-The build script is kept outside this repository, so the plugin contains only what it runs.
-It is being added to the career-compass-mcp repository, where anyone can rerun it and compare
-the output with this repository.
+To check it yourself: install `career-compass-mcp@2.9.3` with `npm install --omit=dev` and
+compare any file under `server/` with the same path in that install. The build script that
+produces this repository lives in career-compass-mcp, so each release can be regenerated
+and compared the same way.
