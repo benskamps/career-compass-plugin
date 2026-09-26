@@ -132,6 +132,7 @@ if (files.length > MAX_FILES || tooBig.length) {
   process.exit(1);
 }
 
+const total = files.length + (files.includes(join(ROOT, "BUNDLE.md")) ? 0 : 1);
 writeFileSync(
   join(ROOT, "BUNDLE.md"),
   `# Where server/ comes from
@@ -149,10 +150,10 @@ ${[...depDirs].sort().map((d) => {
   const p = JSON.parse(readFileSync(join(pkgDir, d, "package.json"), "utf-8"));
   return `  - \`${p.name}@${p.version}\` (${p.license ?? "see its package.json"})`;
 }).join("\n")}
-- ${files.length + 1} files in the plugin in total.
+- ${total} files in the plugin in total.
 
 To check it yourself: run the same command on a clean checkout and compare with \`git diff\`.
 `,
 );
-console.log(`Bundled ${PKG}@${version}: ${files.length + 1} files.`);
+console.log(`Bundled ${PKG}@${version}: ${total} files.`);
 rmSync(work, { recursive: true, force: true });

@@ -1,10 +1,8 @@
 # Where server/ comes from
 
-Built by `.github/scripts/build-bundle.mjs 2.9.3` from `npm pack` of the v2.9.3 source tag,
-because the npm release was still publishing. Once
-[career-compass-mcp@2.9.3](https://www.npmjs.com/package/career-compass-mcp/v/2.9.3) is on npm,
-the Rebuild workflow re-runs this from the published tarball and any difference shows up as a
-pull request. Its source is
+Built by `.github/scripts/build-bundle.mjs 2.9.3` from the npm package
+[career-compass-mcp@2.9.3](https://www.npmjs.com/package/career-compass-mcp/v/2.9.3), the same tarball
+`npx career-compass-mcp@2.9.3` installs. Its source is
 [v2.9.3 in career-compass-mcp](https://github.com/benskamps/career-compass-mcp/tree/v2.9.3).
 
 - Nothing is minified, bundled into one file, or edited. Each file is copied as published.
@@ -20,6 +18,6 @@ pull request. Its source is
   - `yaml@2.9.1` (ISC)
   - `zod@4.6.5` (MIT)
   - `zod-to-json-schema@3.25.2` (ISC)
-- 378 files in the plugin in total.
+- 379 files in the plugin in total.
 
 To check it yourself: run the same command on a clean checkout and compare with `git diff`.
