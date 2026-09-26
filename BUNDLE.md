@@ -20,7 +20,7 @@ Built from the npm package
   - `yaml@2.9.1` (ISC)
   - `zod@4.6.5` (MIT)
   - `zod-to-json-schema@3.25.2` (ISC)
-- 378 files in the plugin in total.
+- 377 files in the plugin in total.
 
 To check it yourself: install `career-compass-mcp@2.9.3` with `npm install --omit=dev` and
 compare any file under `server/` with the same path in that install. The build script that
