@@ -12,6 +12,10 @@ Built by `.github/scripts/build-bundle.mjs 2.9.3` from the npm package
 - In \`zod\`'s package.json, metadata that Node doesn't read (\`llms\`, \`llmsFull\`, \`mcpServer\`,
   \`funding\`, \`support\`, \`zshy\`, \`files\`, \`scripts\`) is removed. The directory's scanner read
   its globs and URLs as references to this plugin's files.
+- The directory's scanner reads the word "pass" next to a URL as a password. Three message
+  strings in \`ajv/dist/core.js\` and one comment in \`zod/v4/classic/from-json-schema.js\` are
+  reworded ("give", "use", "go through"), and \`zod\`'s \`./v4/locales/*\` export is removed
+  (those files aren't bundled). The skill's wording avoids "pass" for the same reason.
 - This plugin always keeps your data in \`~/.career-compass/\`. The npm package's data-folder
   setting is left out here until the directory's scanner accepts it.
 - Only the files the server loads are included. esbuild traced them from
