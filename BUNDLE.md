@@ -9,6 +9,11 @@ Built by `.github/scripts/build-bundle.mjs 2.9.3` from the npm package
   exception: in `yaml`, the two debug switches that read `LOG_TOKENS` and `LOG_STREAM` from
   the environment (`dist/parse/parser.js`, `dist/compose/composer.js`) are removed. They only
   print parser internals, and the server never sets them.
+- In \`zod\`'s package.json, metadata that Node doesn't read (\`llms\`, \`llmsFull\`, \`mcpServer\`,
+  \`funding\`, \`support\`, \`zshy\`, \`files\`, \`scripts\`) is removed. The directory's scanner read
+  its globs and URLs as references to this plugin's files.
+- This plugin always keeps your data in \`~/.career-compass/\`. The npm package's data-folder
+  setting is left out here until the directory's scanner accepts it.
 - Only the files the server loads are included. esbuild traced them from
   `build/src/index.js`; it was not used to transform anything.
 - Runtime dependencies, as locked by that install:
