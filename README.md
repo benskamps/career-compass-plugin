@@ -80,7 +80,8 @@ policy, covering collection, storage, sharing, retention, and contact details, i
 The code in `server/` is the compiled output of
 [career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.9.3, plus the files the
 server loads from its runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `yaml`, and
-what they depend on), copied unmodified. `BUNDLE.md` lists where each file came from and how to rebuild it.
+what they depend on), copied as published except for two removed debug lines in `yaml`.
+`BUNDLE.md` lists where each file came from and what changed.
 
 ## License
 
