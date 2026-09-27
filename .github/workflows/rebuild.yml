@@ -1,0 +1,114 @@
+name: Rebuild from a career-compass-mcp release
+
+# Checks npm once a day. When a career-compass-mcp release is newer than this plugin, it
+# rebuilds server/ from the published package with the build script in career-compass-mcp
+# (scripts/build-plugin-bundle.mjs) and opens a pull request here. Merging that pull request
+# is what sends the new version to the Claude directory.
+#
+# Uses only this repo's own GITHUB_TOKEN, so there is no secret to create or rotate. It needs
+# one repository setting: Settings > Actions > General > "Allow GitHub Actions to create and
+# approve pull requests".
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact career-compass-mcp version to bundle (blank = latest on npm)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: rebuild
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Decide whether there is anything to build
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${INPUT_VERSION:-$(npm view career-compass-mcp version)}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Not an exact version: '$version'"
+            exit 1
+          fi
+          current="$(node -p "require('./.claude-plugin/plugin.json').version")"
+          echo "npm: $version  plugin: $current"
+          build=true
+          if [ -z "$INPUT_VERSION" ] && [ "$version" = "$current" ]; then build=false; fi
+          if gh pr list --head "bundle/v$version" --state open --json number --jq 'length' | grep -qv '^0$'; then
+            echo "A pull request for $version is already open."
+            build=false
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+      # The release's own source (skill, icon, privacy policy), plus the current build script
+      # from the default branch, so a release tagged before a script fix still builds.
+      - name: Fetch career-compass-mcp
+        if: steps.v.outputs.build == 'true'
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          git clone --quiet --depth 1 --branch "v$VERSION" https://github.com/benskamps/career-compass-mcp "$RUNNER_TEMP/mcp"
+          git -C "$RUNNER_TEMP/mcp" fetch --quiet --depth 1 origin main
+          git -C "$RUNNER_TEMP/mcp" show FETCH_HEAD:scripts/build-plugin-bundle.mjs > "$RUNNER_TEMP/mcp/scripts/build-plugin-bundle.mjs"
+
+      # esbuild only traces which files the server loads; see the script's header.
+      - name: Install esbuild
+        if: steps.v.outputs.build == 'true'
+        working-directory: ${{ runner.temp }}/mcp/scripts
+        run: npm i --prefix . --no-save --no-package-lock --no-audit --no-fund esbuild@0.28.2
+
+      - name: Build the bundle
+        if: steps.v.outputs.build == 'true'
+        env:
+          CC_SOURCE_DIR: ${{ runner.temp }}/mcp
+        run: node "$RUNNER_TEMP/mcp/scripts/build-plugin-bundle.mjs" "${{ steps.v.outputs.version }}"
+
+      - name: Smoke-test the bundled server
+        if: steps.v.outputs.build == 'true'
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            | HOME="$RUNNER_TEMP/home" timeout 20 node server/build/src/index.js > "$RUNNER_TEMP/out.jsonl" || true
+          count=$(grep '"id":2' "$RUNNER_TEMP/out.jsonl" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).result.tools.length))')
+          echo "tools: $count"
+          test "$count" -eq 18
+
+      - name: Open a pull request
+        if: steps.v.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Already matches $VERSION; nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "bundle/v$VERSION"
+          git add -A
+          git commit -m "Bundle career-compass-mcp $VERSION"
+          git push -u origin "bundle/v$VERSION"
+          gh pr create --title "Bundle career-compass-mcp $VERSION" \
+            --body "Rebuilt server/ from career-compass-mcp@$VERSION on npm with scripts/build-plugin-bundle.mjs from career-compass-mcp. See BUNDLE.md."
