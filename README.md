@@ -79,7 +79,7 @@ registry, only when you ask for them, and neither carries your data:
 - **Update check:** the `check_setup` tool can ask the registry for the latest published
   version. It is off by default; Claude turns it on when you ask whether there is an update.
 - **The optional web dashboard:** if you ask to open it, it starts with
-  `npx -y career-compass-mcp@2.9.3 dashboard`, which downloads that exact version from the
+  `npx -y career-compass-mcp@2.9.4 dashboard`, which downloads that exact version from the
   registry. The dashboard itself serves pages only to your own machine.
 
 Files stay until you delete them; removing the data folder removes everything. The full
@@ -90,7 +90,7 @@ policy, covering collection, storage, sharing, retention, and contact details, i
 ## Source
 
 The code in `server/` is the compiled output of
-[career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.9.3, plus the files the
+[career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.9.4, plus the files the
 server loads from its runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `yaml`, and
 what they depend on), copied unmodified. `BUNDLE.md` lists where each file came from and how to rebuild it.
 
