@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { loadCareerData } from "../storage/file-store.js";
+import { loadCareerData, loadPipeline } from "../storage/file-store.js";
 import { guardedRead } from "./read-guard.js";
 import { formatSignalDigest } from "./signal-digest.js";
 import { embedUntrusted } from "../untrusted.js";
 import { noCareerDataMessage } from "../empty-state.js";
+import { TRUTH_RULE } from "./truth-rule.js";
 export function registerResumeTools(server) {
     server.registerTool("tailor_resume", {
         title: "Tailor Resume",
@@ -58,7 +59,7 @@ Using the complete Career KB above, generate a tailored resume:
 **Structure for ${format} format:**
 ${format === "standard" ? `1. Header (name, contact, LinkedIn)
 2. Professional Summary (3-4 sentences, bridging background to this role)
-3. Core Competencies (keyword-matched to posting)
+3. Core Competencies (only skills in the Career KB, in the posting's wording where it names the same skill)
 4. Professional Experience (reverse chronological, achievement-focused)
 5. ${includeProjects ? "Key Projects\n6. Education & Certifications" : "Education & Certifications"}` : ""}
 ${format === "federal" ? `1. Header with full contact info
@@ -85,13 +86,15 @@ ${format === "functional" ? `1. Header
 **Rules:**
 - Match the posting's language exactly where truthful
 - Lead each achievement with an action verb
-- Quantify every achievement possible (%, $, time, scale)
+- Keep every number the Career KB gives; never add a number it doesn't
 - ATS-safe: no tables, columns, headers/footers, graphics
 - Do not fabricate — only use data from the Career KB
-- Flag "[VERIFY]" next to any claim that needs confirmation
+- Mark anything that needs my confirmation with a [confirm: ...] placeholder
 - Industry-agnostic: use the posting's vocabulary, not my previous employer's
 
-Output the full resume text, then a "Keyword Match Report" showing which posting requirements are covered and which aren't.`,
+Output the full resume text, then a "Keyword Match Report" showing which posting requirements are covered and which aren't.
+
+${TRUTH_RULE}`,
                 }],
         };
     });
@@ -104,15 +107,17 @@ Output the full resume text, then a "Keyword Match Report" showing which posting
             idempotentHint: true,
             openWorldHint: false,
         },
-        description: "Write a compelling, personalized cover letter for a specific job posting using your Career KB.",
+        description: "Write a compelling, personalized cover letter using your Career KB. Works from a pasted posting, from an application already in the pipeline (its cached posting, role, and notes), or from just a company and role.",
         inputSchema: {
-            posting: z.string().describe("Full job posting text"),
+            posting: z.string().optional().describe("Full job posting text. Optional: without it, the cached posting from the pipeline is used, or the letter is written from the role and your history"),
             company: z.string().describe("Company name"),
+            role: z.string().optional().describe("Role title, used to find the application in the pipeline and when there is no posting"),
+            applicationId: z.string().optional().describe("Pipeline application ID, to use its cached posting and notes"),
             hiringManager: z.string().optional().describe("Hiring manager name if known"),
             tone: z.enum(["professional", "conversational", "enthusiastic", "concise"]).default("professional").describe("Voice of the letter. Match it to the company: professional for traditional or regulated employers, conversational for startups, enthusiastic when you genuinely want this one, concise when the posting asks for brevity."),
             angle: z.string().optional().describe("The key story or angle to lead with"),
         },
-    }, async ({ posting, company, hiringManager, tone, angle }) => {
+    }, async ({ posting, company, role, applicationId, hiringManager, tone, angle }) => {
         const read = await guardedRead(() => loadCareerData());
         if (!read.ok)
             return read.response;
@@ -121,6 +126,27 @@ Output the full resume text, then a "Keyword Match Report" showing which posting
             return {
                 content: [{ type: "text", text: noCareerDataMessage() }],
             };
+        }
+        // Asking a user to paste a posting the pipeline already holds, or refusing to
+        // draft without one, was the top memory failure in the evals. Use what's saved.
+        let appContext = "";
+        if (!posting || applicationId) {
+            const pipeRead = await guardedRead(() => loadPipeline());
+            if (!pipeRead.ok)
+                return pipeRead.response;
+            const lc = (s) => s.trim().toLowerCase();
+            const app = applicationId
+                ? pipeRead.value.applications.find(a => a.id === applicationId)
+                : pipeRead.value.applications.find(a => lc(a.company) === lc(company) && (!role || lc(a.role) === lc(role)));
+            if (app) {
+                role = role ?? app.role;
+                posting = posting ?? app.postingText;
+                appContext = `
+## From Your Pipeline
+- **Role:** ${app.role}
+- **Status:** ${app.status}${app.referral ? `\n- **Referral:** ${app.referral}` : ""}
+- **Notes:** ${app.notes.length ? embedUntrusted("application notes", app.notes.join("; ")) : "None"}`;
+            }
         }
         return {
             content: [{
@@ -133,11 +159,11 @@ Output the full resume text, then a "Keyword Match Report" showing which posting
 **Top achievements:**
 ${career.experience.flatMap(e => e.achievements.slice(0, 2).map(a => `- ${a.metric}: ${a.impact}`)).slice(0, 8).join("\n")}
 
-## Job Posting
-${embedUntrusted("job posting", posting)}
+${posting ? `## Job Posting\n${embedUntrusted("job posting", posting)}` : `## Job Posting\nNone available. Write the letter from the role${role ? ` (${role})` : ""}, the company name, and my history. Do not ask me for the posting first: deliver the letter, then say in one line that pasting the posting would let you sharpen it.`}
+${appContext}
 
 ## Parameters
-- **Company:** ${company}
+- **Company:** ${company}${role ? `\n- **Role:** ${role}` : ""}
 - **Hiring manager:** ${hiringManager ?? "Unknown (use 'Dear Hiring Team')"}
 - **Tone:** ${tone}
 ${angle ? `- **Lead angle:** ${angle}` : ""}
@@ -147,11 +173,11 @@ ${angle ? `- **Lead angle:** ${angle}` : ""}
 **Instructions for Claude:**
 Write a compelling cover letter. Structure:
 
-**Opening (1 paragraph):** Hook with a specific achievement or observation about ${company} that connects to why I'm applying. Don't start with "I am writing to apply..."
+**Opening (1 paragraph):** Hook with a specific achievement of mine, or something the posting says about ${company}, that connects to why I'm applying. Don't open with "I am writing to apply" or any version of "I'm applying for the X role".
 
 **Body (2 paragraphs):**
-- Para 1: My most relevant experience, told as a brief story with a specific outcome
-- Para 2: Why ${company} specifically — what excites me about their mission, product, or stage
+- Para 1: My most relevant experience and its outcome, told plainly from the Career KB
+- Para 2: Why ${company} specifically, using only what the posting, my notes, or I have said about them. If that's nothing, make the case about the role and the problems it owns rather than inventing facts about the company
 
 **Closing (1 paragraph):** Confident call to action. Specific, not generic.
 
@@ -161,7 +187,9 @@ ${tone === "conversational" ? "Warm, direct, human — write like you talk" : ""
 ${tone === "enthusiastic" ? "High energy, genuine excitement, mission-driven" : ""}
 ${tone === "concise" ? "Every sentence earns its place. Max 250 words total." : ""}
 
-Keep it under 400 words. Make it feel human, not templated.`,
+Keep it under 400 words. Make it feel human, not templated, through plain specific language rather than invented story: each sentence about me is either a fact from the Career KB or a plain statement of what I would bring or want. No scenes, causes, surprises, or lessons the Career KB doesn't give ("when results were stuck", "I didn't call it that at the time"), no "I've always…", and no claims about how I work today unless I am working today.
+
+${TRUTH_RULE}`,
                 }],
         };
     });
