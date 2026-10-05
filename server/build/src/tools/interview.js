@@ -34,23 +34,25 @@ export function registerInterviewTools(server) {
             return careerRead.response;
         const career = careerRead.value;
         let appContext = "";
-        if (applicationId) {
+        if (applicationId || company) {
             const pipeRead = await guardedRead(() => loadPipeline());
             if (!pipeRead.ok)
                 return pipeRead.response;
-            const pipeline = pipeRead.value;
-            const app = pipeline.applications.find(a => a.id === applicationId);
+            const app = findApplication(pipeRead.value, applicationId, company, role);
             if (app) {
                 company = company ?? app.company;
                 role = role ?? app.role;
                 postingText = postingText ?? app.postingText;
+                const rounds = app.interviewRounds.map(r => `  - ${r.type.replace(/_/g, " ")} (${r.date || "date not recorded"})` +
+                    `${r.interviewers.length ? `, with ${r.interviewers.join(", ")}` : ""}` +
+                    `${r.outcome ? `: ${r.outcome}` : ""}${r.notes ? `. ${r.notes}` : ""}`);
                 appContext = `
-**Application context:**
+**Application context** (pipeline entry \`${app.id}\`):
 - Status: ${app.status}
-- Applied: ${app.dateApplied ?? "Unknown"}
-- Rounds completed: ${app.interviewRounds.length}
+- Applied: ${app.dateApplied ?? "Unknown"}${app.postingUrl ? `\n- Posting: ${app.postingUrl}` : ""}${salaryLine(app)}
+- Rounds recorded: ${app.interviewRounds.length}${rounds.length ? `\n${rounds.join("\n")}` : ""}
 - Notes: ${app.notes.join("; ") || "None"}
-- Contacts: ${app.contacts.map(c => `${c.name} (${c.title})`).join(", ") || "None"}`;
+- Contacts: ${app.contacts.map(c => `${c.name}${c.title ? ` (${c.title})` : ""}`).join(", ") || "None"}`;
             }
         }
         if (!career) {
@@ -151,13 +153,12 @@ ${TRUTH_RULE}`,
         let rounds = [];
         let postingText;
         let appContext = "";
-        if (applicationId) {
+        if (applicationId || company) {
             const pipeRead = await guardedRead(() => loadPipeline());
             if (!pipeRead.ok)
                 return pipeRead.response;
-            const pipeline = pipeRead.value;
-            const app = pipeline.applications.find(a => a.id === applicationId);
-            if (!app) {
+            const app = findApplication(pipeRead.value, applicationId, company, role);
+            if (!app && applicationId) {
                 return {
                     isError: true,
                     content: [{
@@ -168,14 +169,17 @@ ${TRUTH_RULE}`,
                         }],
                 };
             }
-            company = company ?? app.company;
-            role = role ?? app.role;
-            rounds = app.interviewRounds;
-            postingText = app.postingText;
-            appContext = `- Status: ${app.status}
-- Applied: ${app.dateApplied ?? "Unknown"}
+            if (app) {
+                applicationId = applicationId ?? app.id;
+                company = company ?? app.company;
+                role = role ?? app.role;
+                rounds = app.interviewRounds;
+                postingText = app.postingText;
+                appContext = `- Status: ${app.status}
+- Applied: ${app.dateApplied ?? "Unknown"}${app.postingUrl ? `\n- Posting: ${app.postingUrl}` : ""}${salaryLine(app)}
 - Known contacts: ${app.contacts.map(c => `${c.name}${c.title ? ` (${c.title})` : ""}`).join(", ") || "None recorded"}
 - Running notes: ${app.notes.join(" · ") || "None"}`;
+            }
         }
         if (!applicationId && !company && !interviewSoFarNotes) {
             return {
@@ -392,6 +396,36 @@ function dateKey(date) {
  * the compliance question did not. Neither alone tells you what the next
  * interviewer will reach for.
  */
+/**
+ * The pipeline entry this prep is about. The id is exact; without one, match the
+ * company name (and role, when several share a company), newest first. Users say
+ * "my Veridian final", not "demo-001", so a company-only lookup that found nothing
+ * told the model "0 rounds recorded" for a process with two rounds on file.
+ */
+export function findApplication(pipeline, applicationId, company, role) {
+    if (applicationId)
+        return pipeline.applications.find(a => a.id === applicationId);
+    if (!company)
+        return undefined;
+    const norm = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const want = norm(company);
+    const byCompany = pipeline.applications
+        .filter(a => norm(a.company) === want)
+        .sort((a, b) => (b.dateUpdated ?? "").localeCompare(a.dateUpdated ?? ""));
+    if (byCompany.length <= 1 || !role)
+        return byCompany[0];
+    return byCompany.find(a => norm(a.role) === norm(role)) ?? byCompany[0];
+}
+/** The posted pay range saved on the application, as a context line, or nothing. */
+function salaryLine(app) {
+    const r = app.salaryRange;
+    if (!r || (r.min === undefined && r.max === undefined))
+        return "";
+    const fmt = (n) => n.toLocaleString("en-US");
+    const band = r.min !== undefined && r.max !== undefined ? `${fmt(r.min)}–${fmt(r.max)}`
+        : r.min !== undefined ? `from ${fmt(r.min)}` : `up to ${fmt(r.max)}`;
+    return `\n- Salary range on file: ${r.currency} ${band}`;
+}
 function buildTimeline(rounds, journal) {
     const items = [];
     for (const r of rounds) {
