@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { join } from "path";
-import { saveCareerSection, mutatePipeline, appendJournalEntry, isCorruptDataError, getDataDir, CAREER_SECTIONS } from "../storage/file-store.js";
-import { Profile, Experience, Skill, Education, Project, Testimonial } from "../schemas/career-schema.js";
+import { saveCareerSection, mutateCareerSection, mutatePipeline, appendJournalEntry, isCorruptDataError, getDataDir, CAREER_SECTIONS, restoreCareerSection, isBackupRestoreError } from "../storage/file-store.js";
+import { diffSection, losesData, describeDiff } from "./section-diff.js";
+import { Profile, Experience, Skill, Education, Project, Testimonial, NarrativeEntry, Story, Person } from "../schemas/career-schema.js";
 import { embedUntrusted } from "../untrusted.js";
+import { TRUTH_RULE } from "./truth-rule.js";
 import { isWriteClaimUnavailable } from "../storage/write-claim.js";
 import { isReadOnlyStore } from "../storage/read-only-error.js";
 /** Per-section schema, so a write is validated with the same rules the loader
@@ -16,6 +18,9 @@ const CAREER_SECTION_SCHEMA = {
     education: z.array(Education),
     projects: z.array(Project),
     testimonials: z.array(Testimonial),
+    narrative: z.array(NarrativeEntry),
+    stories: z.array(Story),
+    people: z.array(Person),
 };
 /**
  * What each section's `data` has to look like, in the parameter description and
@@ -48,6 +53,12 @@ const SECTION_SHAPES = {
         "outcomes?: [string], url? }",
     testimonials: "array of { source (name and title), relationship ('Direct Manager' | 'Peer' | …), " +
         "quote, date?, context? }",
+    narrative: "array of { topic: 'why_looking' | 'why_left' | 'gap' | 'switch' | 'work_authorization' | " +
+        "'notice_period' | 'optimizing_for' | 'other', text (the user's own words), updated?: 'YYYY-MM-DD' }",
+    stories: "array of { title, situation?, task?, action?, result?, text?, sourceCompany?, sourceRole?, " +
+        "themes?: [string], usedWith?: [{ applicationId?, company?, round?, interviewer?, date? }] }",
+    people: "array of { name, howWeKnow?, company?, role?, lastContact?: 'YYYY-MM-DD', offered?, " +
+        "applicationIds?: [string], reconnectEveryDays?: number, notes? }",
 };
 /** The shapes as one block, for the `data` parameter description. */
 export const SECTION_SHAPE_HELP = Object.entries(SECTION_SHAPES)
@@ -105,8 +116,10 @@ export function registerCareerKBTools(server) {
             idempotentHint: true,
             openWorldHint: false,
         },
-        description: "Paste any career document — performance review, award email, project summary, LinkedIn recommendation — and extract structured achievements for your Career KB. " +
-            "Extraction only: it reads what you paste and returns YAML for review. Writing that YAML to disk is a separate, explicit step with save_career_section.",
+        description: "Extract achievements, skills, and quotes from a career document the user pasted (performance review, award " +
+            "email, project summary, recommendation) as Career KB YAML for them to review, copying only what the document " +
+            "states and marking missing metrics [confirm: ...]. Extraction only: writing the reviewed YAML is a separate, " +
+            "explicit save_career_section call.",
         inputSchema: {
             content: z.string().describe("Full document text to ingest"),
             documentType: z.enum(["performance_review", "award", "project_summary", "recommendation", "email", "self_review", "other"]).describe("Type of document"),
@@ -142,7 +155,11 @@ ${embedUntrusted("uploaded document", content)}
 Extract structured career data from this document. Extract only what it says: copy numbers
 and wording exactly, and never fill a field the document doesn't support. A metric the
 document doesn't give is \`"[confirm: metric?]"\`, not an estimate. Leave proficiency out
-unless the document rates the skill. A recommendation's quote must be verbatim.
+unless the document rates the skill. A recommendation's quote must be verbatim. Describe
+what the user did in the document's own terms: "made a real difference" is not "improved
+workflows", and "bringing stakeholders along" is not "buy-in across groups". The person
+the document names is the user (people go by nicknames); don't compare it with an account
+or system name.
 
 Produce output in two formats:
 
@@ -254,7 +271,7 @@ you don't already have it. The previous version is kept as a timestamped \`.bak\
             }
             catch (error) {
                 if (isCorruptDataError(error) || isWriteClaimUnavailable(error) || isReadOnlyStore(error)) {
-                    return { content: [{ type: "text", text: `❌ ${error.message}` }] };
+                    return { isError: true, content: [{ type: "text", text: `❌ ${error.message}` }] };
                 }
                 throw error;
             }
@@ -284,7 +301,7 @@ Write a rejection response that achieves: **${responseGoal}**
 - Genuine, not sycophantic
 - Brief (3-5 sentences max)
 - Memorable without being awkward
-- Mention only what the rejection message or I have said about the process. Don't invent a conversation, an interviewer's name, or a detail of the interviews
+- Mention only what the rejection message or I have said about the process. Don't invent a conversation, an interviewer's name, or a detail of the interviews, and don't say how the process felt to me ("I enjoyed", "I'm disappointed") or what it involved unless I said so; leave a [confirm: ...] slot instead
 ${hadGoodRapport ? "- Reference the positive experience, using a specific detail only if the message or I gave one; otherwise keep it general" : ""}
 
 **For goal: ${responseGoal}:**
@@ -299,6 +316,8 @@ ${responseGoal === "express_continued_interest" ? "Mention the company is still 
 3. **LinkedIn connection note** (if you haven't connected yet — 300 chars)
 
 Lead with the recommended response, ready to copy; keep any commentary to one line after the drafts.
+
+${TRUTH_RULE}
 
 ${statusUpdated
                         ? `
@@ -319,7 +338,11 @@ ${statusUpdated
             idempotentHint: false,
             openWorldHint: false,
         },
-        description: "Record a durable career signal to your journal — what an interview surfaced, why an offer felt right or wrong, the pattern behind a rejection, fresh proof of a skill. Append-only; over time these compound into the real shape of your career and enrich future resume, interview, and fit work.",
+        description: "Append one lasting takeaway to the user's career journal: what an interview surfaced, why an offer felt right or " +
+            "wrong, the pattern behind a rejection, or fresh proof of a skill. Later fit checks, interview prep, and résumés " +
+            "read these back. Writes one new entry and never changes existing ones. Offer it after a debrief, a rejection, " +
+            "or an offer decision, and save only with the user's OK. Set origin to user_said for what they said, or " +
+            "inferred for your own reading, which drafts then treat as a hypothesis.",
         inputSchema: {
             type: z.enum([
                 "fit_signal",
@@ -345,8 +368,10 @@ ${statusUpdated
                 "ingest_document",
                 "manual",
             ]).default("manual").describe("Which surface produced this insight"),
+            origin: z.enum(["user_said", "inferred"]).optional().describe("user_said: the user stated this. inferred: it is your own reading of what they said or did. Inferred " +
+                "entries are kept, but later drafts treat them as hypotheses and never state them as facts about the user."),
         },
-    }, async ({ type, summary, detail, applicationId, company, role, signals, sentiment, source }) => {
+    }, async ({ type, summary, detail, applicationId, company, role, signals, sentiment, source, origin }) => {
         const entry = {
             id: randomUUID().slice(0, 8),
             date: new Date().toISOString(),
@@ -359,6 +384,9 @@ ${statusUpdated
             signals,
             sentiment,
             source,
+            // Only stored when given: an entry with no origin is a legacy one, and
+            // stamping "user_said" on it here would claim something nobody checked.
+            ...(origin ? { origin } : {}),
         };
         let total;
         try {
@@ -409,6 +437,7 @@ ${statusUpdated
             role,
             applicationId && `\`${applicationId}\``,
             sentiment && `sentiment: ${sentiment}`,
+            origin === "inferred" && "kept as your inference: a hypothesis, never stated as fact in drafts",
         ].filter(Boolean).join(" · ");
         return {
             content: [{
@@ -435,8 +464,15 @@ ${statusUpdated
         },
         description: "Write one section of the Career KB to disk. This is how the Career KB gets populated — " +
             "ingest_document and the resume tools only read and extract. Replaces the whole section, " +
-            "so send the complete list you want stored, not just new entries. The previous version is " +
-            "kept as a timestamped .bak next to it.",
+            "so send the complete list you want stored, not just new entries. A save that would drop " +
+            "stored entries or achievements is refused and names them, unless `replace` is true. " +
+            "The previous version is kept as a timestamped .bak next to it. To undo a bad save, pass " +
+            "`restoreFrom` with a backup name that check_setup lists instead of `data`: the current file is " +
+            "backed up first, then that backup is put back. Writes to disk either way; use it only with the user's OK.",
+        // Claude Code asks before every call to a tool marked this way, in every
+        // permission mode. The skill promises "the user approves each write"; for
+        // the one tool that replaces a whole section, that should hold in auto mode too.
+        _meta: { "anthropic/requiresUserInteraction": true },
         inputSchema: {
             section: z.enum(CAREER_SECTIONS).describe("Which part of the Career KB to write. 'profile' is a single object; every other section is a list."),
             // Declared as a union, not `z.unknown()`: zod emits `{}` for unknown, and
@@ -449,12 +485,41 @@ ${statusUpdated
                 z.record(z.string(), z.unknown()),
                 z.array(z.unknown()),
                 z.string(),
-            ]).describe("The complete contents for this section — an object for 'profile', an array for every " +
-                "other section. Send it as structured JSON, not as a stringified blob. " +
-                "Shapes (? marks optional):\n\n" +
+            ]).optional().describe("The complete contents for this section — an object for 'profile', an array for every " +
+                "other section. Send it as structured JSON, not as a stringified blob. Required unless " +
+                "`restoreFrom` is given. Shapes (? marks optional):\n\n" +
                 SECTION_SHAPE_HELP),
+            restoreFrom: z.string().optional().describe("Restore this section from one of its own backups instead of writing `data`: the exact backup file " +
+                "name as check_setup lists it, e.g. 'experience.yaml.2026-10-07T14-03-11-482Z.bak'. The current " +
+                "file is backed up first. Leave `data` out when you use this."),
+            replace: z.boolean().optional().describe("Set true only when the user has confirmed that entries should be removed, or that an " +
+                "unreadable section file should be overwritten. Without it, a save that would drop stored " +
+                "entries is refused and the refusal lists them."),
         },
-    }, async ({ section, data }) => {
+    }, async ({ section, data, replace, restoreFrom }) => {
+        if (restoreFrom !== undefined) {
+            if (data !== undefined) {
+                return {
+                    isError: true,
+                    content: [{
+                            type: "text",
+                            text: "❌ Send either `data` (to write the section) or `restoreFrom` (to put a backup back), not both. Nothing was written.",
+                        }],
+                };
+            }
+            return restoreSection(section, restoreFrom);
+        }
+        if (data === undefined) {
+            return {
+                isError: true,
+                content: [{
+                        type: "text",
+                        text: `❌ \`data\` is missing, so nothing was written. Send the complete contents of \`${section}\`, ` +
+                            `or pass \`restoreFrom\` with a backup name from check_setup to restore one.\n\n` +
+                            `Expected \`${section}\`: ${SECTION_SHAPES[section]}`,
+                    }],
+            };
+        }
         // Validate against the same schema the loader enforces, BEFORE touching
         // disk. Writing first and validating on read would let one bad write make
         // the whole KB unloadable — loadCareerData fails closed on a corrupt
@@ -493,24 +558,144 @@ ${statusUpdated
                     }],
             };
         }
+        const file = join(getDataDir(), "career", `${section}.yaml`);
+        let diff = null;
+        let refused = null;
         try {
-            await saveCareerSection(section, parsed.data);
+            // Read, compare and write under one lock (mutateCareerSection), so the
+            // comparison is against what is really on disk. An unreadable file
+            // throws CorruptDataError here and nothing is written.
+            await mutateCareerSection(section, (current) => {
+                diff = diffSection(section, current, parsed.data);
+                if (!replace && losesData(diff)) {
+                    refused = diff;
+                    throw new SaveRefused();
+                }
+                return parsed.data;
+            });
         }
         catch (error) {
-            return {
-                isError: true,
-                content: [{ type: "text", text: `❌ Could not write ${section}: ${error.message}` }],
-            };
+            if (error instanceof SaveRefused && refused) {
+                const r = refused;
+                return {
+                    isError: true,
+                    content: [{
+                            type: "text",
+                            text: `❌ Not saved: this would remove what's already stored in **${section}** ` +
+                                `(${describeDiff(r)}). Your ${section}.yaml is untouched.\n\n` +
+                                `If you meant to add or edit, send the full list including the existing entries ` +
+                                `(the receipt above lists them; the \`career://${section}\` resource has them in full). If the user confirmed the removal, ` +
+                                `call again with \`replace: true\`.`,
+                        }],
+                };
+            }
+            if (isCorruptDataError(error) && replace) {
+                // The user chose to overwrite a file that can't be read. The broken
+                // copy is kept as a .bak by the write itself.
+                try {
+                    await saveCareerSection(section, parsed.data);
+                }
+                catch (inner) {
+                    return { isError: true, content: [{ type: "text", text: `❌ Could not write ${section}: ${inner.message}` }] };
+                }
+            }
+            else if (isCorruptDataError(error)) {
+                return {
+                    isError: true,
+                    content: [{
+                            type: "text",
+                            text: `❌ Not saved: \`${file}\` exists but can't be read, so saving now would replace ` +
+                                `whatever is in it without either of us seeing it. Ask the user to fix the file or ` +
+                                `restore its newest .bak. If they'd rather overwrite it, call again with \`replace: true\` ` +
+                                `(the broken file is kept as a .bak).`,
+                        }],
+                };
+            }
+            else {
+                return {
+                    isError: true,
+                    content: [{ type: "text", text: `❌ Could not write ${section}: ${error.message}` }],
+                };
+            }
         }
         const count = Array.isArray(parsed.data) ? parsed.data.length : 1;
+        const receipt = diff ? `\n${describeDiff(diff)}.` : "";
         return {
             content: [{
                     type: "text",
-                    text: `✅ Saved **${section}** (${count} ${count === 1 ? "entry" : "entries"}) to ` +
-                        `\`${join(getDataDir(), "career", `${section}.yaml`)}\`.\n\n` +
+                    text: `✅ Saved **${section}** (${count} ${count === 1 ? "entry" : "entries"}) to \`${file}\`.${receipt}\n` +
+                        whatSavingBought(section, parsed.data) +
+                        `The previous version is kept as a .bak next to it.\n\n` +
                         `It's plain YAML — open it, edit it, or delete it any time. Nothing left your machine.`,
                 }],
         };
     });
+}
+/** Thrown inside the section lock to abort a save that would lose data. */
+class SaveRefused extends Error {
+}
+/**
+ * The one line that says what an experience save made possible.
+ *
+ * "Saved experience (4 entries)" reads as filing. The point of saving is that
+ * the next fit check can quote real outcomes, and the ones with numbers are what
+ * a screener weighs — so say how many there now are. A metric "contains a
+ * number" when it has a digit; "cut onboarding from six weeks" does not count,
+ * which is honest: it's the version a reader skims past.
+ */
+export function whatSavingBought(section, data) {
+    if (section !== "experience" || !Array.isArray(data))
+        return "";
+    const all = data
+        .flatMap((e) => (Array.isArray(e.achievements) ? e.achievements : []));
+    const withNumbers = all.filter((a) => typeof a.metric === "string" && /\d/.test(a.metric)).length;
+    return `Next fit check can cite ${all.length} ${all.length === 1 ? "achievement" : "achievements"}, ${withNumbers} with numbers.\n`;
+}
+/**
+ * `save_career_section` with `restoreFrom`: put one of the section's own backups
+ * back. Restore used to be "open the folder and copy the .bak over the file",
+ * which no one who needs it can do. A parameter on the existing write tool, not a
+ * new tool: it is the same write, behind the same confirmation.
+ */
+async function restoreSection(section, backupName) {
+    const file = join(getDataDir(), "career", `${section}.yaml`);
+    let result;
+    try {
+        result = await restoreCareerSection(section, backupName.trim());
+    }
+    catch (error) {
+        if (isBackupRestoreError(error)) {
+            return {
+                isError: true,
+                content: [{
+                        type: "text",
+                        text: `❌ Not restored: ${error.message} Your ${section}.yaml is untouched. Run check_setup to see the backups by time and entry count.`,
+                    }],
+            };
+        }
+        if (isWriteClaimUnavailable(error) || isReadOnlyStore(error) || isCorruptDataError(error)) {
+            return { isError: true, content: [{ type: "text", text: `❌ ${error.message}` }] };
+        }
+        return {
+            isError: true,
+            content: [{ type: "text", text: `❌ Could not restore ${section}: ${error.message}` }],
+        };
+    }
+    const diff = result.previousUnreadable ? null : diffSection(section, result.previous, result.restored);
+    const count = Array.isArray(result.restored) ? result.restored.length : 1;
+    const before = result.previousUnreadable
+        ? "The file it replaced couldn't be read; "
+        : result.previous === null
+            ? "There was no current file; "
+            : "";
+    return {
+        content: [{
+                type: "text",
+                text: `✅ Restored **${section}** from \`${backupName.trim()}\` (${count} ${count === 1 ? "entry" : "entries"}) to \`${file}\`.` +
+                    `${diff ? `\n${describeDiff(diff)}.` : ""}\n` +
+                    whatSavingBought(section, result.restored) +
+                    `${before}${before ? "it" : "The version it replaced"} is kept as a new .bak next to it, so this restore can be undone the same way.`,
+            }],
+    };
 }
 //# sourceMappingURL=career-kb.js.map

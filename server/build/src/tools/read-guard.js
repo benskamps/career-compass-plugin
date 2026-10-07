@@ -25,7 +25,7 @@ export async function guardedRead(load) {
         if (isCorruptDataError(error) || isWriteClaimUnavailable(error) || isReadOnlyStore(error)) {
             return {
                 ok: false,
-                response: { content: [{ type: "text", text: `❌ ${error.message}` }] },
+                response: { isError: true, content: [{ type: "text", text: `❌ ${error.message}` }] },
             };
         }
         throw error;

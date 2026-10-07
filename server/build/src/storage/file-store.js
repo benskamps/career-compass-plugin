@@ -4,7 +4,7 @@ import { join, dirname, basename, resolve } from "path";
 import { homedir } from "os";
 import { randomUUID } from "crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { CareerData, Pipeline, JournalSection, Profile, Experience, Skill, Education, Project, Testimonial, } from "../schemas/career-schema.js";
+import { CareerData, Pipeline, JournalSection, Profile, Experience, Skill, Education, Project, Testimonial, NarrativeEntry, Story, Person, } from "../schemas/career-schema.js";
 import { freshenSampleDates, isBundledSampleDir } from "../sample-data.js";
 import { z } from "zod";
 import { withWriteClaim } from "./write-claim.js";
@@ -255,7 +255,7 @@ export async function loadCareerData() {
         return null;
     // Load each section and merge
     const raw = {};
-    const sections = ["profile", "experience", "skills", "education", "projects", "testimonials", "journal"];
+    const sections = ["profile", "experience", "skills", "education", "projects", "testimonials", "journal", "narrative", "stories", "people"];
     await Promise.all(sections.map(async (section) => {
         const path = join(dir, `${section}.yaml`);
         if (!existsSync(path)) {
@@ -298,9 +298,37 @@ export async function loadCareerData() {
         throw new CorruptDataError(profilePath, error);
     }
 }
+/**
+ * Optional KB sections whose file exists but can't be parsed.
+ *
+ * {@link loadCareerData} loads such a section as an empty list so one typo in a
+ * hand-edited experience.yaml doesn't take the whole KB down. The cost was
+ * silence: every tool then reported "no experience" with confidence, and the
+ * natural next step, re-saving the section, overwrote the file. Tools that read
+ * the KB use this to say so instead.
+ */
+export async function unreadableCareerSections() {
+    const dir = careerDir();
+    if (!existsSync(join(dir, "profile.yaml")))
+        return [];
+    const bad = [];
+    for (const section of ["experience", "skills", "education", "projects", "testimonials", "journal", "narrative", "stories", "people"]) {
+        const path = join(dir, `${section}.yaml`);
+        if (!existsSync(path))
+            continue;
+        try {
+            parseYaml(await readFile(path, "utf-8"));
+        }
+        catch {
+            bad.push(section);
+        }
+    }
+    return bad;
+}
 /** The only section names that may become a filename. */
 export const CAREER_SECTIONS = [
     "profile", "experience", "skills", "education", "projects", "testimonials",
+    "narrative", "stories", "people",
 ];
 /**
  * Write one section of the Career KB.
@@ -325,6 +353,9 @@ const CAREER_SECTION_SCHEMA = {
     education: z.array(Education),
     projects: z.array(Project),
     testimonials: z.array(Testimonial),
+    narrative: z.array(NarrativeEntry),
+    stories: z.array(Story),
+    people: z.array(Person),
 };
 /**
  * Read one Career KB section, validated, or null if the file does not exist.
@@ -399,6 +430,143 @@ export async function mutateCareerSection(section, mutator) {
         const next = await mutator(current);
         await atomicWriteYaml(path, next);
         return next;
+    }));
+}
+/** `experience.yaml.2026-10-07T02-36-52-123Z.bak` → `2026-10-07T02:36:52.123Z`. */
+function backupTimestamp(name) {
+    const m = /\.(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})(?:-(\d+))?Z\.bak$/.exec(name);
+    if (!m)
+        return "";
+    return `${m[1]}T${m[2]}:${m[3]}:${m[4]}${m[5] ? `.${m[5]}` : ""}Z`;
+}
+/** Names of our backups of one file in `dir`, newest first. Never throws. */
+async function backupNames(dir, base) {
+    try {
+        const pattern = backupPattern(base);
+        return (await readdir(dir)).filter((n) => pattern.test(n)).sort().reverse();
+    }
+    catch {
+        return [];
+    }
+}
+/** Entry count of a section-shaped YAML document, or null when it doesn't parse. */
+function countEntries(raw, section) {
+    let parsed;
+    try {
+        parsed = parseYaml(raw);
+    }
+    catch {
+        return null;
+    }
+    if (parsed === null || parsed === undefined)
+        return 0;
+    if (Array.isArray(parsed))
+        return parsed.length;
+    const wrapped = parsed[section];
+    return Array.isArray(wrapped) ? wrapped.length : 1;
+}
+/**
+ * The recent backups of every Career KB section file, newest first, at most
+ * `max` per file. Files with no backups are left out. The journal is not listed:
+ * it is append-only and `restoreFrom` can't put it back, so listing it would
+ * offer a restore that doesn't exist.
+ *
+ * Backups were written on every save from the start, but nothing ever told the
+ * user they existed or which one held what — ".bak exists" is not recovery a
+ * job seeker can do. This is what `check_setup` lists, with an entry count so
+ * "the one from before it went from 4 roles to 1" can be found by eye.
+ */
+export async function listCareerBackups(max = BACKUP_RETENTION) {
+    const dir = careerDir();
+    const out = [];
+    for (const section of CAREER_SECTIONS) {
+        const file = `${section}.yaml`;
+        const names = (await backupNames(dir, file)).slice(0, max);
+        if (names.length === 0)
+            continue;
+        const backups = await Promise.all(names.map(async (name) => {
+            let entries = null;
+            try {
+                entries = countEntries(await readFile(join(dir, name), "utf-8"), section);
+            }
+            catch {
+                // Pruned or locked between readdir and read: report it as unreadable.
+            }
+            return { name, takenAt: backupTimestamp(name), entries };
+        }));
+        out.push({ file, section, backups });
+    }
+    return out;
+}
+/** Thrown when a restore names a file that isn't a valid backup of the section. */
+export class BackupRestoreError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = "BackupRestoreError";
+    }
+}
+export function isBackupRestoreError(e) {
+    return e instanceof BackupRestoreError;
+}
+/**
+ * Swap one of a section's own backups back in, under the same lock and claim as
+ * every other write.
+ *
+ * `backupName` comes from the model, so it is never joined into a path until it
+ * has been found, character for character, in the listing of this section's own
+ * backups. `../profile.yaml`, an absolute path, another section's backup, or a
+ * `.bak` a user made by hand all fail that check: the only files that can be
+ * restored are the ones {@link atomicWriteYaml} wrote for this section.
+ *
+ * The backup is validated with the section schema before anything is written,
+ * so restoring a broken copy cannot turn a working KB into an unloadable one.
+ * The write itself goes through {@link atomicWriteYaml}, which backs up the
+ * current file first, so a restore is itself undoable. A current file that
+ * can't be read is not a reason to refuse: getting away from it is usually why
+ * the user is restoring.
+ */
+export async function restoreCareerSection(section, backupName) {
+    if (!CAREER_SECTIONS.includes(section)) {
+        throw new Error(`Unknown career section "${section}". Expected one of: ${CAREER_SECTIONS.join(", ")}.`);
+    }
+    const dir = careerDir();
+    const path = join(dir, `${section}.yaml`);
+    return withDataLock(path, () => withStoreWriteClaim(async () => {
+        const names = await backupNames(dir, `${section}.yaml`);
+        if (!names.includes(backupName)) {
+            throw new BackupRestoreError(names.length
+                ? `"${backupName}" is not one of the backups of ${section}.yaml. Its backups are: ${names.join(", ")}.`
+                : `${section}.yaml has no backups to restore.`);
+        }
+        let candidate;
+        try {
+            const parsed = parseYaml(await readFile(join(dir, backupName), "utf-8"));
+            candidate =
+                section === "profile" || Array.isArray(parsed)
+                    ? parsed
+                    : (parsed?.[section] ?? []);
+        }
+        catch {
+            throw new BackupRestoreError(`${backupName} is not valid YAML, so it can't be restored.`);
+        }
+        const checked = CAREER_SECTION_SCHEMA[section].safeParse(candidate);
+        if (!checked.success) {
+            const issue = checked.error.issues[0];
+            throw new BackupRestoreError(`${backupName} doesn't match the shape of ${section} (${issue.path.join(".") || "(root)"}: ${issue.message}), so it can't be restored.`);
+        }
+        let previous = null;
+        let previousUnreadable = false;
+        try {
+            previous = await readCareerSection(section);
+        }
+        catch (error) {
+            if (!isCorruptDataError(error))
+                throw error;
+            previousUnreadable = true;
+        }
+        const restored = checked.data;
+        await atomicWriteYaml(path, restored);
+        return { previous, previousUnreadable, restored };
     }));
 }
 // ─── Career journal (append-only signals) ──────────────────────────────────────

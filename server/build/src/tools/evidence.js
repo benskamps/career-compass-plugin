@@ -103,12 +103,13 @@ export function registerEvidenceTools(server) {
         }
         catch (error) {
             if (error instanceof GitUnavailableError || error instanceof NotARepoError) {
-                return { content: [{ type: "text", text: `❌ ${error.message}` }] };
+                return { isError: true, content: [{ type: "text", text: `❌ ${error.message}` }] };
             }
             // A missing `git` binary is the other likely failure and is worth naming
             // rather than surfacing as a raw spawn error.
             const msg = error?.message ?? String(error);
             return {
+                isError: true,
                 content: [
                     {
                         type: "text",
