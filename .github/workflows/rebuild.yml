@@ -93,6 +93,37 @@ jobs:
           count=$(grep '"id":2' "$RUNNER_TEMP/out.jsonl" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).result.tools.length))')
           echo "tools: $count"
           test "$count" -eq 18
+          # Server instructions are what Claude Code loads at session start when tool search
+          # defers the tools, and it cuts them at 2,048 characters.
+          grep '"id":1' "$RUNNER_TEMP/out.jsonl" | node -e '
+            let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+              const text = JSON.parse(s).result.instructions;
+              const n = typeof text === "string" ? text.trim().length : 0;
+              console.log(`instructions: ${n} chars`);
+              if (n === 0) { console.log("::error::initialize returned no server instructions"); process.exit(1); }
+              if (text.length > 2048) { console.log(`::error::server instructions are ${text.length} chars; Claude Code truncates at 2048`); process.exit(1); }
+            });'
+
+      # Cowork skips an MCP server whose userConfig option has no default, so the data
+      # folder option has to keep one.
+      - name: Check the data folder option keeps its default
+        if: steps.v.outputs.build == 'true'
+        run: |
+          node -e '
+            const p = require("./.claude-plugin/plugin.json");
+            const d = p.userConfig && p.userConfig.data_path && p.userConfig.data_path.default;
+            if (typeof d !== "string" || d.trim() === "") {
+              console.log("::error::plugin.json userConfig.data_path.default is not set");
+              process.exit(1);
+            }
+            console.log(`userConfig.data_path.default: ${d}`);'
+
+      # The same validator the directory runs. --strict fails on warnings too, such as an
+      # unrecognized manifest field. Pinned so a CLI release can't change the verdict
+      # between two runs of the same bundle; 2.1.281 and later know the listing URL fields.
+      - name: Validate the plugin
+        if: steps.v.outputs.build == 'true'
+        run: npx -y @anthropic-ai/claude-code@2.1.292 plugin validate --strict .
 
       - name: Open a pull request
         if: steps.v.outputs.build == 'true'
