@@ -1,5 +1,5 @@
 import { statusRank } from "../schemas/career-schema.js";
-import { computeStats } from "../pipeline-stats.js";
+import { computeStats, countWord, endedAfterSamePattern } from "../pipeline-stats.js";
 /**
  * Today's job-search digest: what `pipeline_view action=next_actions` returns,
  * and what `/career-compass:today` is built on.
@@ -77,6 +77,27 @@ function candidates(app, now) {
         const action = `Prep for it${next.d <= 1 ? " today" : ""}. Ask "prep me for my ${app.company} ${roundName(next.type)}" and I'll build it from your history and notes.`;
         out.push({ app, score: next.d <= 1 ? 100 : next.d <= 7 ? 70 : 15, line, action });
     }
+    // The day or two after an interview. Before this, past rounds were dropped
+    // and a quiet process got "Check status": a timeline chase on the one day a
+    // thank-you note and a debrief are the moves. The debrief is also how the
+    // Career KB learns what interviewers probe, through capture_insight.
+    const past = (app.interviewRounds ?? [])
+        .map((r) => ({ ...r, d: days(r.date) }))
+        .filter((r) => !Number.isNaN(r.d) && r.d < 0)
+        .sort((a, b) => b.d - a.d);
+    const lastRound = past[0];
+    const justInterviewed = Boolean(lastRound) && lastRound.d >= -2 &&
+        ["screening", "interviewing"].includes(app.status) && !lastRound.outcome;
+    if (justInterviewed) {
+        out.push({
+            app,
+            score: 85,
+            line: `🗒️ **Debrief** — ${label(app)}: ${roundName(lastRound.type)} ${when(lastRound.d)} (ID: ${app.id})`,
+            action: "Send a short thank-you today; tell me one thing you talked about and I'll draft it. Then tell me how it went, and I'll keep what's useful for your next round.",
+        });
+    }
+    // A round in the last week is the next step; chasing a timeline that soon reads as anxious.
+    const recentRound = Boolean(lastRound) && lastRound.d >= -7;
     // Offers.
     if (app.status === "offer" || app.status === "negotiating") {
         const exp = days(app.offer?.expiresDate);
@@ -120,7 +141,7 @@ function candidates(app, now) {
         if (quiet >= 30) {
             out.push({ app, score: 50, quiet, line: `🕸️ **Gone quiet** — ${label(app)}: ${app.status} ${quiet}d with no next step (ID: ${app.id})`, action: "Send one last nudge for a timeline, or say so and I'll mark it ghosted." });
         }
-        else if (quiet >= limit && !waiting) {
+        else if (quiet >= limit && !waiting && !recentRound) {
             out.push({ app, score: 60, line: `📞 **Check status** — ${label(app)}: in ${app.status} ${quiet}d with no next step booked (ID: ${app.id})`, action: who ? `Ask ${who} for a timeline. I can draft it.` : "Ask the recruiter for a timeline. I can draft it." });
         }
     }
@@ -134,22 +155,184 @@ function today(now) {
     const p = (n) => String(n).padStart(2, "0");
     return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
 }
-export function buildTodayDigest(pipeline, now = new Date()) {
+/** A timestamp's calendar day in the user's own timezone, as YYYY-MM-DD. */
+function localDay(timestamp) {
+    const ms = Date.parse(timestamp);
+    return Number.isNaN(ms) ? undefined : today(new Date(ms));
+}
+const toDigestItem = (i) => ({ applicationId: i.app.id, line: i.line, ...(i.action ? { action: i.action } : {}) });
+/** Close-out runs this many days after an acceptance; landing mode runs to day 90. */
+const CLOSE_OUT_DAYS = 14;
+const LANDING_DAYS = 90;
+/** At most this many reconnect nudges a day: the ledger is a garden, not an inbox. */
+const MAX_RECONNECTS = 2;
+/** The one feedback ask in the product. Shown only in the close-out after an accepted offer. */
+export const FEEDBACK_LINE = "If Career Compass helped, a GitHub star or a two-line note in Discussions is the only way the author hears about it. Nothing is sent automatically.";
+/**
+ * People in the ledger it is time to get back in touch with.
+ *
+ * Two reasons, and nothing else: the user set a cadence (`reconnectEveryDays`)
+ * and it has passed, or someone offered a referral on an application that is
+ * still live and it has been three months. A person with no `lastContact` is
+ * never nudged: "last contact N days ago" would be a number made up.
+ */
+function reconnects(career, apps, now) {
+    const days = calendarDays(now);
+    const live = new Set(apps.filter((a) => !CLOSED.includes(a.status)).map((a) => a.id));
+    const due = [];
+    for (const p of career?.people ?? []) {
+        const since = -days(p.lastContact);
+        if (Number.isNaN(since) || since < 0)
+            continue;
+        const cadence = p.reconnectEveryDays !== undefined && since > p.reconnectEveryDays;
+        const referralGoingCold = since > 90 && /referr/i.test(p.offered ?? "") && (p.applicationIds ?? []).some((id) => live.has(id));
+        if (!cadence && !referralGoingCold)
+            continue;
+        due.push({
+            over: cadence ? since - p.reconnectEveryDays : since - 90,
+            item: {
+                line: `🤝 Reconnect — ${p.name}${p.company ? ` (${p.company})` : ""}: last contact ${since} days ago`,
+                action: referralGoingCold && !cadence
+                    ? "They offered a referral on a role you're still in. A short update keeps it warm; I can draft it."
+                    : "A two-line hello with no ask is enough. I can draft it.",
+            },
+        });
+    }
+    return due.sort((a, b) => b.over - a.over).slice(0, MAX_RECONNECTS).map((d) => d.item);
+}
+/** First day of the search: the earliest date anything was found or sent. */
+function searchStart(apps) {
+    return apps
+        .flatMap((a) => [a.dateApplied, a.dateDiscovered])
+        .filter((d) => Boolean(d) && /^\d{4}-\d{2}-\d{2}/.test(d))
+        .map((d) => d.slice(0, 10))
+        .sort()[0];
+}
+/** The calendar week so far, Monday to today, as a day-offset test. */
+function inThisWeek(now) {
+    const days = calendarDays(now);
+    const sinceMonday = (now.getDay() + 6) % 7;
+    return (iso) => {
+        const d = days(iso);
+        return !Number.isNaN(d) && d <= 0 && d >= -sinceMonday;
+    };
+}
+function weekPace(apps, pace, now) {
+    if (!pace)
+        return null;
+    const thisWeek = inThisWeek(now);
+    return {
+        pace,
+        sent: apps.filter((a) => thisWeek(a.dateApplied)).length,
+        conversations: apps.flatMap((a) => a.interviewRounds ?? []).filter((r) => thisWeek(r.date)).length,
+    };
+}
+/**
+ * The close-out, for the two weeks after the user accepts an offer.
+ *
+ * Before this the digest's answer to the best day of a search was "all N
+ * tracked applications are closed". Each step is something only this product
+ * can do from what is on file: the people to thank are the referrers and
+ * contacts the user recorded, the processes to withdraw from are the live rows,
+ * and the recap is the user's own numbers. Every step is an offer; nothing on
+ * the board changes until the user says so.
+ */
+function closeOutItem(accepted, apps, weeks) {
+    const thanks = [...new Set([
+            ...apps.map((a) => a.referral?.trim()).filter((n) => Boolean(n)),
+            ...(accepted.contacts ?? []).map((c) => c.name),
+        ])].slice(0, 6);
+    const live = apps.filter((a) => a.id !== accepted.id && !CLOSED.includes(a.status));
+    const stats = computeStats(apps);
+    const steps = [];
+    if (thanks.length)
+        steps.push(`Thank the people who helped: ${thanks.join(", ")}. I'll draft a short note to each.`);
+    if (live.length)
+        steps.push(`Withdraw from the processes still live: ${live.map((a) => `${label(a)} (${a.status}, ID: ${a.id})`).join(", ")}. I'll draft each note and mark them withdrawn when you say so.`);
+    steps.push(`Keep what won: tell me which stories landed and I'll save them to \`stories\`, and add the new role to \`experience\`, so your next search starts warm.`);
+    steps.push(`Recap: ${stats.total} tracked${weeks ? ` over ${weeks} week${weeks === 1 ? "" : "s"}` : ""} · ${stats.responseRate}% response rate · ${stats.offers} offer${stats.offers === 1 ? "" : "s"}.`);
+    return {
+        app: accepted,
+        score: 1000,
+        line: `🎉 **You accepted ${label(accepted)}.** Congratulations. Here's how to close the search well (ID: ${accepted.id})`,
+        action: `Pick any of these and I'll do it with you; nothing changes on your board until you say so.\n` +
+            steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n") +
+            `\n  ${FEEDBACK_LINE}`,
+    };
+}
+/**
+ * Landing mode: the first 90 days after an acceptance.
+ *
+ * The interview record is most valuable the week the user starts: it says what
+ * the hiring manager probed and worried about. So the first week offers a
+ * 30/60/90 plan built from those rounds and the journal's interview notes, and
+ * every week asks for one win (`capture_insight` type `win`), which becomes
+ * review material and the next search's résumé bullets.
+ */
+function landingItem(accepted, apps, career, sinceAccepted, now) {
+    const days = calendarDays(now);
+    const toStart = days(accepted.offer?.startDate);
+    const rounds = accepted.interviewRounds?.length ?? 0;
+    const company = accepted.company.toLowerCase();
+    const insightCount = (career?.journal ?? []).filter((e) => e.type === "interview_insight" && (e.applicationId === accepted.id || (e.company ?? "").toLowerCase() === company)).length;
+    const probed = rounds || insightCount
+        ? `what your interviewers probed (${[rounds ? `${rounds} round${rounds === 1 ? "" : "s"}` : "", insightCount ? `${insightCount} interview note${insightCount === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")} on file for ${accepted.company})`
+        : "what you remember your interviewers probing";
+    const plan = `Want a 30/60/90 plan? I'd build it from ${probed}, and only from that.`;
+    const stillLive = apps.filter((a) => a.id !== accepted.id && !CLOSED.includes(a.status)).length;
+    const tidy = stillLive ? ` ${stillLive === 1 ? "One other application still shows" : `${stillLive} other applications still show`} as live; say the word and I'll mark ${stillLive === 1 ? "it" : "them"} withdrawn.` : "";
+    if (!Number.isNaN(toStart) && toStart > 0) {
+        return {
+            app: accepted, score: 900,
+            line: `🏁 **Starting at ${accepted.company}** ${when(toStart)} (${accepted.offer.startDate}, ID: ${accepted.id})`,
+            action: plan + tidy,
+        };
+    }
+    const sinceStart = Number.isNaN(toStart) ? sinceAccepted : -toStart;
+    const week = Math.floor(sinceStart / 7) + 1;
+    return {
+        app: accepted, score: 900,
+        line: `🏁 **Week ${week} in the new role: capture one win** — ${label(accepted)} (ID: ${accepted.id})`,
+        action: "Tell me one thing that went well this week, however small, and I'll keep it as a win (capture_insight, type win). By review time they're your evidence, and your next résumé's bullets." +
+            (week === 1 ? ` ${plan}` : "") + tidy,
+    };
+}
+export function buildTodayDigest(pipeline, now = new Date(), career) {
     const apps = pipeline.applications;
-    const text = (t) => ({ content: [{ type: "text", text: t }] });
+    const respond = (t, data) => ({
+        content: [{ type: "text", text: t }],
+        structuredContent: { ...data },
+    });
     if (apps.length === 0) {
-        return text([
+        const headline = "Nothing tracked yet, so there is nothing to act on.";
+        const start = "Paste a job posting you're considering and say \"track this\". I'll add it and check your fit. Or name a role you've already applied to (company, title, roughly when) and I'll add it with `pipeline_add`.";
+        return respond([
             "# Today",
             "",
-            "Nothing tracked yet, so there is nothing to act on.",
+            headline,
             "",
-            "**Start here:** paste a job posting you're considering and say \"track this\". I'll add it and check your fit. Or name a role you've already applied to (company, title, roughly when) and I'll add it with `pipeline_add`.",
+            `**Start here:** ${start.charAt(0).toLowerCase()}${start.slice(1)}`,
             "",
             "Once something is tracked, this shows follow-ups due, interviews coming up, offer deadlines, and applications that have gone quiet, with one clear first move each day.",
-        ].join("\n"));
+        ].join("\n"), { date: today(now), headline, startHere: { line: start }, alsoToday: [], comingUp: [], footer: [] });
     }
-    // One item per application: its most pressing reason.
-    let items = apps
+    const days = calendarDays(now);
+    const start = searchStart(apps);
+    // An accepted offer changes what the digest is for. The most recent one wins;
+    // `dateUpdated` is the closest thing on file to the day it was accepted.
+    const accepted = apps
+        .filter((a) => a.status === "accepted")
+        .sort((a, b) => (b.dateUpdated ?? "").localeCompare(a.dateUpdated ?? ""))[0];
+    const sinceAccepted = accepted ? -days(localDay(accepted.dateUpdated)) : NaN;
+    const othersLive = apps.some((a) => a.id !== accepted?.id && !CLOSED.includes(a.status));
+    const closingOut = !Number.isNaN(sinceAccepted) && sinceAccepted >= 0 && sinceAccepted <= CLOSE_OUT_DAYS;
+    const landing = !Number.isNaN(sinceAccepted) && sinceAccepted >= 0 && sinceAccepted <= LANDING_DAYS &&
+        (sinceAccepted > CLOSE_OUT_DAYS || !othersLive);
+    const afterAccept = closingOut || landing;
+    // One item per application: its most pressing reason. Once the user has taken
+    // a job, the other live processes are one "withdraw" line in the close-out,
+    // not a list of follow-ups to send to companies they are about to leave.
+    let items = afterAccept ? [] : apps
         .filter((a) => !CLOSED.includes(a.status))
         .map((a) => candidates(a, now).sort((x, y) => y.score - x.score)[0])
         .filter((i) => Boolean(i));
@@ -165,19 +348,43 @@ export function buildTodayDigest(pipeline, now = new Date()) {
             action: "Pick any worth one last nudge and I'll draft it. Say so and I'll mark the rest ghosted, so your board shows what is really live.",
         });
     }
+    const weeksToAccept = accepted && start ? Math.max(1, Math.round((days(localDay(accepted.dateUpdated)) - days(start)) / 7)) : null;
+    if (closingOut)
+        items.push(closeOutItem(accepted, apps, weeksToAccept));
+    if (landing)
+        items.push(landingItem(accepted, apps, career, sinceAccepted, now));
     items.sort((x, y) => y.score - x.score);
     const due = items.filter((i) => i.score >= TODAY);
-    const soon = items.filter((i) => i.score < TODAY);
+    // Reconnects are the lowest-stakes item there is, so they always go last:
+    // never above an interview, an offer or a debrief, and never more than two.
+    const soon = [...items.filter((i) => i.score < TODAY).map(toDigestItem), ...(closingOut ? [] : reconnects(career, apps, now))];
     const stats = computeStats(apps);
     const board = `${stats.total} tracked · ${stats.active} active · ${stats.inConversation} in conversation · ${stats.offers} with an offer${stats.sent ? ` · ${stats.responseRate}% response rate` : ""}`;
+    // Where the user is in the campaign, and against the pace they set. A search
+    // with no visible progress feels endless; "week 6, 2 of 5 sent" does not.
+    const pace = afterAccept ? null : weekPace(apps, career?.profile?.weeklyPace, now);
+    const week = start && !afterAccept ? Math.floor(-days(start) / 7) + 1 : NaN;
+    const campaign = [
+        !Number.isNaN(week) && week >= 1 ? `Week ${week} of your search` : "",
+        pace ? `This week: ${pace.sent} of ${pace.pace} sent · ${pace.conversations} conversation${pace.conversations === 1 ? "" : "s"}` : "",
+    ].filter(Boolean).join(" · ");
+    const footer = [campaign, board].filter(Boolean);
+    const pattern = afterAccept ? null : endedAfterSamePattern(apps);
+    const data = { date: today(now), startHere: null, alsoToday: [], comingUp: soon, footer };
     const out = [`# Today — ${today(now)}`, ""];
     if (due.length === 0) {
-        out.push(stats.active === 0
+        const headline = stats.active === 0
             ? `Nothing needs you today: all ${stats.total} tracked applications are closed.`
-            : `Nothing needs you today. Your ${stats.active} active application${stats.active === 1 ? " is" : "s are"} inside normal wait windows.`, "", "**Start here:** a good day to line up the next role. Paste a posting and I'll check your fit and track it.");
+            : `Nothing needs you today. Your ${stats.active} active application${stats.active === 1 ? " is" : "s are"} inside normal wait windows.`;
+        const move = quietDayMove(apps, pace);
+        data.headline = headline;
+        data.startHere = { line: move };
+        out.push(headline, "", `**Start here:** ${move}`);
     }
     else {
         const [first, ...rest] = due;
+        data.startHere = toDigestItem(first);
+        data.alsoToday = rest.map(toDigestItem);
         out.push("## Start here", first.line, `→ ${first.action}`);
         if (rest.length) {
             out.push("", `## Also today (${rest.length})`);
@@ -188,9 +395,35 @@ export function buildTodayDigest(pipeline, now = new Date()) {
     if (soon.length) {
         out.push("", "## Coming up");
         for (const i of soon)
-            out.push(`- ${i.line}`);
+            out.push(`- ${i.line}`, ...(i.action ? [`  → ${i.action}`] : []));
     }
-    out.push("", `_${board}_`);
-    return text(out.join("\n"));
+    if (pattern) {
+        data.pattern = pattern;
+        out.push("", `💡 ${pattern}`);
+    }
+    out.push("", ...footer.map((f) => `_${f}_`));
+    return respond(out.join("\n"), data);
+}
+/**
+ * The forward move on a day nothing is due.
+ *
+ * With a weekly pace set this is where it earns its keep: "nothing needs you"
+ * on its own is a reason to close the tab, while "two to go this week, start
+ * with the Canopy role you found" is a reason to do something.
+ */
+function quietDayMove(apps, pace) {
+    const found = apps
+        .filter((a) => a.status === "discovered")
+        .sort((a, b) => (a.dateDiscovered ?? a.dateUpdated ?? "").localeCompare(b.dateDiscovered ?? b.dateUpdated ?? ""));
+    const firstFound = found.length
+        ? `You have ${found.length} role${found.length === 1 ? "" : "s"} found and not applied to; start with ${label(found[0])} (ID: ${found[0].id}).`
+        : "Paste a posting and I'll check your fit and track it.";
+    if (!pace)
+        return `a good day to line up the next role. ${firstFound}`;
+    const left = pace.pace - pace.sent;
+    if (left > 0) {
+        return `you've sent ${pace.sent} of ${pace.pace} this week, so ${countWord(left)} to go. ${firstFound}`;
+    }
+    return `you've hit your pace: ${pace.sent} of ${pace.pace} sent this week. Use today to deepen one live process instead: a referral ask, company research, or prep for what's next.`;
 }
 //# sourceMappingURL=today-digest.js.map

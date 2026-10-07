@@ -6,7 +6,7 @@ import { homedir } from "os";
 import { join, resolve } from "path";
 import { promisify } from "util";
 import { parse as parseYaml } from "yaml";
-import { getDataDir, loadPipeline, isCorruptDataError, CAREER_SECTIONS } from "../storage/file-store.js";
+import { getDataDir, loadPipeline, isCorruptDataError, CAREER_SECTIONS, listCareerBackups } from "../storage/file-store.js";
 import { inspectWriteClaim } from "../storage/write-claim.js";
 import { PKG_NAME, PKG_VERSION } from "../version.js";
 const GLYPH = {
@@ -278,6 +278,8 @@ async function readSectionStates(careerDir) {
         }
     }));
 }
+/** Sections filled in as the search goes, never in one sitting. */
+const GROWS_AS_YOU_GO = new Set(["journal", "narrative", "stories", "people"]);
 function careerKbFindings(states) {
     const findings = [];
     const unreadable = states.filter((s) => s.unreadable);
@@ -293,7 +295,9 @@ function careerKbFindings(states) {
     const populated = states.filter((s) => !s.unreadable && s.count > 0);
     // The journal is written by `capture_insight` as you go, not something a user
     // sits down and fills in, so its emptiness is never a gap worth nagging about.
-    const emptyOrMissing = states.filter((s) => !s.unreadable && s.count === 0 && s.section !== "journal");
+    // Narrative, stories and people fill up the same way, one answer or one
+    // interview at a time, so an empty one is not a gap either.
+    const emptyOrMissing = states.filter((s) => !s.unreadable && s.count === 0 && !GROWS_AS_YOU_GO.has(s.section));
     const inventory = populated
         .map((s) => `${s.section} (${s.count})`)
         .join(", ");
@@ -340,48 +344,88 @@ function careerKbFindings(states) {
         findings.push({
             label: "Career KB",
             status: "ok",
-            detail: `All sections populated: ${inventory}.`,
+            detail: `Populated: ${inventory}.`,
         });
     }
     return findings;
 }
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
-async function pipelineFinding(dataDir, port) {
+/**
+ * The pipeline finding, plus how many applications it holds (0 when it can't be
+ * read). The count decides two things in the report: whether this is a fresh
+ * install, and whether the optional feedback line is shown.
+ *
+ * An empty pipeline used to come with "add the first one with `pipeline_add`"
+ * and a dashboard command. That is homework, handed over in a health check, and
+ * the model tended to repeat it to someone who had only asked a question.
+ */
+async function pipelineFinding() {
     try {
         const pipeline = await loadPipeline();
         const total = pipeline.applications.length;
         if (total === 0) {
-            return {
-                label: "Pipeline",
-                status: "unknown",
-                detail: "No applications tracked yet.",
-                fix: "Add the first one with `pipeline_add`, then watch it move:\n" +
-                    dashboardCommand(dataDir, port),
-            };
+            return { total, finding: { label: "Pipeline", status: "ok", detail: "No applications tracked yet." } };
         }
         const active = pipeline.applications.filter((a) => a.status !== "rejected" && a.status !== "withdrawn" && a.status !== "accepted").length;
         return {
-            label: "Pipeline",
-            status: "ok",
-            detail: `Parses cleanly — ${total} application${total === 1 ? "" : "s"}, ${active} still active.`,
+            total,
+            finding: {
+                label: "Pipeline",
+                status: "ok",
+                detail: `Parses cleanly — ${total} application${total === 1 ? "" : "s"}, ${active} still active.`,
+            },
         };
     }
     catch (error) {
         if (isCorruptDataError(error)) {
             return {
-                label: "Pipeline",
-                status: "problem",
-                detail: `${error.filePath} exists but cannot be parsed, so the pipeline tools and the dashboard both refuse to run rather than overwrite it.`,
-                fix: "Fix the YAML, or restore the timestamped .bak next to it.",
+                total: 0,
+                finding: {
+                    label: "Pipeline",
+                    status: "problem",
+                    detail: `${error.filePath} exists but cannot be parsed, so the pipeline tools and the dashboard both refuse to run rather than overwrite it.`,
+                    fix: "Fix the YAML, or restore the timestamped .bak next to it.",
+                },
             };
         }
         return {
-            label: "Pipeline",
-            status: "problem",
-            detail: `Could not read the pipeline: ${error.message}`,
-            fix: "Check that your CAREER_DATA_PATH directory is readable.",
+            total: 0,
+            finding: {
+                label: "Pipeline",
+                status: "problem",
+                detail: `Could not read the pipeline: ${error.message}`,
+                fix: "Check that your CAREER_DATA_PATH directory is readable.",
+            },
         };
     }
+}
+// ─── Backups ──────────────────────────────────────────────────────────────────
+/** `2026-10-07T14:03:11.482Z` → `2026-10-07 14:03 UTC`. */
+function backupTime(iso) {
+    return iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : "time unknown";
+}
+/**
+ * The recent `.bak` copies of each KB section, and how to put one back.
+ *
+ * Every save has kept one since the first release, and every error message said
+ * "restore the .bak" — to people who do not know what a .bak is or which of five
+ * to pick. Listing them with a time and an entry count lets the user point at
+ * "the one from before it dropped to one role", and `restoreFrom` does the rest.
+ */
+export function backupsFinding(files) {
+    if (files.length === 0)
+        return null;
+    const lines = files.flatMap(({ file, backups }) => [
+        `${file}:`,
+        ...backups.map((b) => `  ${backupTime(b.takenAt)} · ${b.entries === null ? "unreadable" : `${b.entries} ${b.entries === 1 ? "entry" : "entries"}`} · ${b.name}`),
+    ]);
+    return {
+        label: "Backups",
+        status: "ok",
+        detail: `Recent copies kept before each save, newest first:\n${lines.join("\n")}`,
+        fix: "To undo a bad save, call `save_career_section` with that section and `restoreFrom` set to the backup's " +
+            "file name. The current file is backed up first, so a restore can be undone too.",
+    };
 }
 // ─── Orphaned temp files ──────────────────────────────────────────────────────
 /**
@@ -496,11 +540,12 @@ export function dashboardCommand(dataDir, port) {
 }
 function dashboardFinding(dataDir, port, result) {
     if (!result.reachable) {
+        // No command here: a dashboard that isn't running is not a finding to act
+        // on, and a two-shell npx command under a green tick read as homework.
         return {
             label: "Dashboard",
             status: "ok",
             detail: `Not running on port ${port} (${result.reason}). That's normal — it only runs while you have it open.`,
-            fix: `Open it on the folder above:\n${dashboardCommand(dataDir, port)}`,
         };
     }
     if (!result.isCareerCompass) {
@@ -520,10 +565,60 @@ function dashboardFinding(dataDir, port, result) {
 // ─── Report ───────────────────────────────────────────────────────────────────
 /** Matches the CLI's default so a user who ran `dashboard` bare is found. */
 export const DEFAULT_DASHBOARD_PORT = 3141;
-export function renderReport(findings, freshInstall) {
-    const lines = ["# Career Compass — Setup Check", ""];
+/** Where the author hears that it helped. Shown only on a healthy install in real use. */
+export const FEEDBACK_LINE = "If Career Compass helped, a GitHub star or a two-line note in Discussions " +
+    "(https://github.com/benskamps/career-compass-mcp/discussions) is the only way the author hears about it. " +
+    "Nothing is sent automatically.";
+/**
+ * Which way this server was started, from the one variable that tells them
+ * apart. Claude Code exports `CLAUDE_PLUGIN_ROOT` to the stdio servers a plugin
+ * declares; a server added by hand (Desktop config, `claude mcp add`, the
+ * `.mcpb`) never has it. "Which install am I on?" is the first question of
+ * every support thread, and the answer used to take three messages.
+ */
+export function runningSurface(env = process.env) {
+    return env.CLAUDE_PLUGIN_ROOT?.trim()
+        ? `Running from the Career Compass plugin v${PKG_VERSION}`
+        : `Running as a standalone MCP server v${PKG_VERSION}`;
+}
+/**
+ * The fresh-install form: three lines, no homework.
+ *
+ * On a brand-new install the full report was about 25 lines of git commands,
+ * dashboard commands and "add a role with `pipeline_add`", injected into the
+ * model's context right as it wrote its first reply (council 2.9.7, activation
+ * note, doctor.ts:257 and :640). None of it is wrong, and none of it is what a
+ * new user needs before their first answer. Anything that does need attention
+ * (a newer version they asked about, leftover temp files) still gets its line.
+ */
+function renderFresh(findings, ctx) {
+    const lines = [
+        "# Career Compass — Setup Check",
+        "",
+        `✅ ${ctx.surface ?? runningSurface()}. The data folder is ready: ${ctx.dataDir ?? getDataDir()}`,
+        "Nothing is saved yet, which is normal for a fresh install. Nothing is broken.",
+        "**Getting started:** paste a résumé (and a job posting, if you have one) and ask a question; " +
+            "Claude answers from it, then offers to save your background with `save_career_section`.",
+    ];
     for (const f of findings) {
-        lines.push(`${GLYPH[f.status]} **${f.label}** — ${f.detail}`);
+        if (f.status === "warn" && f.label !== "Career KB")
+            lines.push(`${GLYPH[f.status]} **${f.label}** — ${f.detail}`);
+    }
+    return lines.join("\n");
+}
+export function renderReport(findings, freshInstall, ctx = {}) {
+    if (freshInstall)
+        return renderFresh(findings, ctx);
+    const lines = ["# Career Compass — Setup Check", ""];
+    if (ctx.surface)
+        lines.push(ctx.surface + ".", "");
+    for (const f of findings) {
+        // A detail may run to several lines (the backup list). Continuation lines
+        // are indented so they don't read as findings of their own.
+        const [head, ...more] = f.detail.split("\n");
+        lines.push(`${GLYPH[f.status]} **${f.label}** — ${head}`);
+        for (const line of more)
+            lines.push(`     ${line}`);
         if (f.fix) {
             // A fix may run to several lines when it spells out a command per shell.
             // Continuation lines are indented under the arrow rather than falling
@@ -537,15 +632,7 @@ export function renderReport(findings, freshInstall) {
     const problems = findings.filter((f) => f.status === "problem").length;
     const warnings = findings.filter((f) => f.status === "warn").length;
     lines.push("");
-    if (freshInstall) {
-        // A brand-new install is not a broken one, and listing its empty sections as
-        // faults is how a first-run experience teaches someone the tool is failing.
-        lines.push("**Getting started.** The install itself is fine — there's just no career data in it yet. " +
-            "Paste your resume into this conversation and ask me to save it; I'll extract the structure " +
-            "and write it with `save_career_section`. After that, add a role you're chasing with " +
-            "`pipeline_add`, and everything else here has something to work with.");
-    }
-    else if (problems > 0) {
+    if (problems > 0) {
         lines.push(`**${problems} thing${problems === 1 ? "" : "s"} to fix**${warnings > 0 ? `, plus ${warnings} worth a look` : ""}. Start with the ❌ above.`);
     }
     else if (warnings > 0) {
@@ -553,6 +640,12 @@ export function renderReport(findings, freshInstall) {
     }
     else {
         lines.push("**Everything checks out.**");
+    }
+    // One optional line, only for someone actually using it: healthy, and with at
+    // least one application tracked. No telemetry exists, so this is the only way
+    // the author learns it helped — and it is said plainly that nothing is sent.
+    if (problems === 0 && (ctx.applications ?? 0) > 0) {
+        lines.push("", FEEDBACK_LINE);
     }
     return lines.join("\n");
 }
@@ -573,7 +666,7 @@ export function registerDoctorTools(server, deps = {}) {
             idempotentHint: true,
             openWorldHint: true,
         },
-        description: "Health-check this Career Compass install and report everything at once: whether a newer version has shipped, whether your data directory exists and is writable, which Career KB sections are filled in, whether the pipeline file parses, leftover temp files, and whether the dashboard is running. Every finding comes with the one command that fixes it. Run this first whenever something seems wrong, or right after an install or upgrade.",
+        description: "Health-check this Career Compass install and report everything at once: how it is running (plugin or standalone) and its version, whether a newer version has shipped, whether your data directory exists and is writable, which Career KB sections are filled in, the recent backups of each section with how to restore one, whether the pipeline file parses, leftover temp files, and whether the dashboard is running. Every finding that needs action comes with the one step that fixes it. Run it when something seems wrong, when the user asks whether it's working, or to find a backup to restore; not on first contact. Writes nothing.",
         inputSchema: {
             checkForUpdates: z
                 .boolean()
@@ -595,7 +688,7 @@ export function registerDoctorTools(server, deps = {}) {
         // its own finding, never the whole report. `checkNpmForUpdate` and
         // `probeLocalDashboard` already resolve rather than throw; this is the
         // belt to their braces, and it holds for an override that is less careful.
-        const [update, sections, pipeline, orphans, claim, dashboard, git] = await Promise.all([
+        const [update, sections, pipeline, orphans, claim, dashboard, git, backups] = await Promise.all([
             checkForUpdates
                 ? checkForUpdate().catch((error) => ({
                     ok: false,
@@ -603,18 +696,21 @@ export function registerDoctorTools(server, deps = {}) {
                 }))
                 : Promise.resolve(null),
             readSectionStates(careerDir),
-            pipelineFinding(dataDir, dashboardPort),
+            pipelineFinding(),
             orphanFinding(dataDir),
             writeClaimFinding(dataDir),
             probeDashboard(dashboardPort).catch(() => ({ reachable: false, reason: "the check could not run" })),
             gitFinding(dataDir),
+            listCareerBackups().catch(() => []),
         ]);
+        const backupFinding = backupsFinding(backups);
         const findings = [
             versionFinding(update),
             await dataDirFinding(dataDir),
             ...(git ? [git] : []),
             ...careerKbFindings(sections),
-            pipeline,
+            ...(backupFinding ? [backupFinding] : []),
+            pipeline.finding,
             orphans,
             claim,
             dashboardFinding(dataDir, dashboardPort, dashboard),
@@ -623,9 +719,16 @@ export function registerDoctorTools(server, deps = {}) {
         // is absent. Keying this off the profile alone closed the report with
         // getting-started guidance for someone who had already written their
         // experience and skills, which reads as the tool not seeing their work.
+        // A tracked application counts as use too: someone with a pipeline and no
+        // KB gets the full report, not the first-run form.
         const hasAnyCareerData = sections.some((s) => s.count > 0);
-        const freshInstall = !hasAnyCareerData && !findings.some((f) => f.status === "problem");
-        return { content: [{ type: "text", text: renderReport(findings, freshInstall) }] };
+        const freshInstall = !hasAnyCareerData && pipeline.total === 0 && !findings.some((f) => f.status === "problem");
+        const text = renderReport(findings, freshInstall, {
+            surface: runningSurface(),
+            dataDir,
+            applications: hasAnyCareerData ? pipeline.total : 0,
+        });
+        return { content: [{ type: "text", text }] };
     });
 }
 //# sourceMappingURL=doctor.js.map

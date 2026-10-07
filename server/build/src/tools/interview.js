@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { loadCareerData, loadPipeline } from "../storage/file-store.js";
 import { guardedRead } from "./read-guard.js";
-import { formatSignalDigest } from "./signal-digest.js";
+import { formatSignalDigest, INFERRED_TAG } from "./signal-digest.js";
 import { embedUntrusted } from "../untrusted.js";
 import { noCareerDataMessage } from "../empty-state.js";
 import { COMPANY_FACTS_RULE, MARKET_DATA_RULE, RESPONSE_SHAPE, TRUTH_RULE } from "./truth-rule.js";
-import { formatCredentials, formatProjects, formatRoles, formatTestimonials } from "./career-context.js";
+import { formatCredentials, formatProjects, formatRoles, formatTestimonials, narrativeBlock, storyBankBlock, storiesAlreadyHeard, RECORD_STORY_USE, } from "./career-context.js";
 export function registerInterviewTools(server) {
     server.registerTool("prepare_interview", {
         title: "Prepare Interview",
@@ -16,10 +16,11 @@ export function registerInterviewTools(server) {
             idempotentHint: true,
             openWorldHint: false,
         },
-        description: "Prep the user for one upcoming interview: an opening pitch, STAR stories built from their real Career KB, likely " +
-            "questions for that round, questions to ask, and the concerns to get ahead of. Finds the application by id or " +
-            "company name and uses its posting, rounds, and contacts. For a later round in a process already under way, " +
-            "call interview_arc too so the prep doesn't repeat ground covered. Writes nothing.",
+        description: "Prep the user for one upcoming interview: an opening pitch, STAR stories (saved ones from their story bank " +
+            "first, skipping any this company or interviewer already heard), likely questions for that round, questions to " +
+            "ask, and the concerns to get ahead of, quoting their saved narrative where it applies. Finds the application by " +
+            "id or company name and uses its posting, rounds, and contacts. For a later round in a process already under " +
+            "way, call interview_arc too so the prep doesn't repeat ground covered. Writes nothing.",
         inputSchema: {
             applicationId: z.string().optional().describe("Pipeline application ID"),
             company: z.string().optional().describe("Company name (if no application ID)"),
@@ -38,15 +39,36 @@ export function registerInterviewTools(server) {
             return careerRead.response;
         const career = careerRead.value;
         let appContext = "";
+        // Who has heard which saved story: the process, the company, the people in it.
+        const audience = { applicationId, company, interviewers: interviewerInfo ? [interviewerInfo] : [] };
         if (applicationId || company) {
             const pipeRead = await guardedRead(() => loadPipeline());
             if (!pipeRead.ok)
                 return pipeRead.response;
             const app = findApplication(pipeRead.value, applicationId, company, role);
+            // A wrong id was ignored silently, so prep went ahead without the
+            // rounds and posting the user expected it to use. interview_arc already
+            // refuses here; do the same.
+            if (applicationId && !app) {
+                return {
+                    isError: true,
+                    content: [{
+                            type: "text",
+                            text: `❌ No application with id \`${applicationId}\`. Run \`pipeline_view\` with action "list" to find it, or pass \`company\` instead.`,
+                        }],
+                };
+            }
             if (app) {
                 company = company ?? app.company;
                 role = role ?? app.role;
                 postingText = postingText ?? app.postingText;
+                audience.applicationId = app.id;
+                audience.company = app.company;
+                audience.interviewers = [
+                    ...(audience.interviewers ?? []),
+                    ...app.interviewRounds.flatMap(r => r.interviewers),
+                    ...app.contacts.map(c => c.name),
+                ];
                 const rounds = app.interviewRounds.map(r => `  - ${r.type.replace(/_/g, " ")} (${r.date || "date not recorded"})` +
                     `${r.interviewers.length ? `, with ${r.interviewers.join(", ")}` : ""}` +
                     `${r.outcome ? `: ${r.outcome}` : ""}${r.notes ? `. ${r.notes}` : ""}`);
@@ -106,7 +128,11 @@ ${career.skills.map(s => s.name).join(", ") || "None listed"}
 ## What others have said
 ${formatTestimonials(career)}
 
-${formatSignalDigest(career.journal)}
+${narrativeBlock(career)}
+
+${storyBankBlock(career, audience)}
+
+${formatSignalDigest(career.journal, 6, company)}
 ${postingText ? `## Job Posting\n${embedUntrusted("cached job posting", postingText)}` : ""}
 
 ---
@@ -118,7 +144,7 @@ Generate complete interview prep tailored to a ${interviewType.replace("_", " ")
 "Tell me about yourself" — tailored specifically to this role and company. Bridge my background to their context.
 
 ### 2. STAR Stories
-Build each one from a real achievement in the Career KB, written out in full. For each story, provide:
+Start from the story bank: where a saved story fits a likely question, use it verbatim and say it is a saved one${career.stories.length ? ", skipping any this company or these interviewers have already heard" : ""}. Only then build new ones, each from a real achievement in the Career KB, written out in full, and offer once to save the new ones to \`stories\`. For each story, provide:
 - **Situation:** Brief context
 - **Task:** What I was responsible for
 - **Action:** What I specifically did (not "we")
@@ -169,7 +195,11 @@ ${TRUTH_RULE}`,
             idempotentHint: true,
             openWorldHint: false,
         },
-        description: "Mid-process projection: reconstructs the interview arc so far — rounds completed, what each surfaced, threads left open — then projects what the NEXT round will probe, without repeating ground already covered.",
+        description: "For a user already partway through one company's interviews: reconstruct the process so far (rounds done, what " +
+            "each surfaced, threads left open, which saved stories each round already heard) from the pipeline, the journal, " +
+            "the story bank, and their notes, then project what the next " +
+            "round will probe and how to prepare without repeating covered ground. Use prepare_interview instead for a first " +
+            "interview. Writes nothing.",
         inputSchema: {
             applicationId: z.string().optional().describe("Pipeline application ID — pulls the rounds, posting, and linked journal entries for this process"),
             company: z.string().optional().describe("Company name (if no application ID, or to match journal entries)"),
@@ -229,6 +259,11 @@ ${TRUTH_RULE}`,
         }
         const journal = matchingJournal(career.journal, applicationId, company, role);
         const timeline = buildTimeline(rounds, journal);
+        const told = storiesToldInProcess(career, {
+            applicationId,
+            company,
+            interviewers: rounds.flatMap(r => r.interviewers),
+        });
         return {
             content: [{
                     type: "text",
@@ -242,10 +277,15 @@ ${appContext ? `\n**Application context:**\n${appContext}` : ""}
 ## The Arc So Far
 ${timeline || "_Nothing recorded yet — no interview rounds in the pipeline and no journal entries matched this company and role._"}
 
+## Stories Already Told in This Process
+${told || "_None recorded. Saved stories carry a usedWith list; nothing in it matches this process yet._"}
+
 ## Career Context
 ${buildArcCareerContext(career)}
 
-${formatSignalDigest(career.journal)}${interviewSoFarNotes ? `## Notes On What Has Happened So Far\n${embedUntrusted("interview notes", interviewSoFarNotes)}\n` : ""}${postingText ? `\n## Job Posting (cached from the pipeline)\n${embedUntrusted("cached job posting", postingText)}\n` : ""}
+${narrativeBlock(career)}
+
+${formatSignalDigest(career.journal, 6, company)}${interviewSoFarNotes ? `## Notes On What Has Happened So Far\n${embedUntrusted("interview notes", interviewSoFarNotes)}\n` : ""}${postingText ? `\n## Job Posting (cached from the pipeline)\n${embedUntrusted("cached job posting", postingText)}\n` : ""}
 ---
 
 **Instructions for Claude:**
@@ -262,7 +302,9 @@ inventing detail.
 ### 2. Ground Already Covered — Do Not Repeat
 List the questions and themes that have already been asked and answered across the rounds
 above. Anything on this list should NOT appear in section 4. Interviewers compare notes;
-re-running a story they already have reads as having nothing else.
+re-running a story they already have reads as having nothing else. Name the saved stories
+already told above by round and by who heard them ("you told Priya that one already"), and
+pick different saved stories for the next round.
 
 ### 3. Open Threads
 Things the last round opened and did not close: a question that got a partial answer, a
@@ -289,7 +331,9 @@ that would most change their read of you if it landed.
 
 After the round happens, capture what they actually asked with \`capture_insight\`
 (\`type: "interview_insight"\`${applicationId ? `, \`applicationId: "${applicationId}"\`` : ""}) — including where this projection was wrong. That is
-what makes the next projection in this process, and the next process, sharper.`,
+what makes the next projection in this process, and the next process, sharper. ${RECORD_STORY_USE}
+
+${TRUTH_RULE}`,
                 }],
         };
     });
@@ -303,8 +347,10 @@ what makes the next projection in this process, and the next process, sharper.`,
             openWorldHint: false,
         },
         description: "Analyze a job offer the user has received: total compensation year one and fully vested, how it compares to their " +
-            "current pay, stated targets, other offers, and any market data they supply, then what to negotiate and the exact " +
-            "words. Benchmarks come only from data the user gives; the server never fetches salary data. Writes nothing.",
+            "current pay, stated targets, other offers (including live offers already recorded in their pipeline, side by " +
+            "side), and any market data they supply, then what to negotiate and the exact words. Use it when the user has an " +
+            "offer in hand. Benchmarks come only from data the user gives; the server never fetches salary data. Writes " +
+            "nothing; when the offer's deadline isn't recorded it suggests saving it with pipeline_update.",
         inputSchema: {
             applicationId: z.string().optional().describe("Pipeline application ID"),
             company: z.string().optional().describe("Company making the offer. Used to pull the matching application for context."),
@@ -317,17 +363,26 @@ what makes the next projection in this process, and the next process, sharper.`,
             otherOffers: z.string().optional().describe("Competing offers or processes (for leverage)"),
         },
     }, async ({ applicationId, company, role, offerDetails, location, currentComp, marketData, priorities, otherOffers }) => {
-        if (applicationId) {
-            const pipeRead = await guardedRead(() => loadPipeline());
-            if (!pipeRead.ok)
-                return pipeRead.response;
-            const pipeline = pipeRead.value;
-            const app = pipeline.applications.find(a => a.id === applicationId);
-            if (app) {
-                company = company ?? app.company;
-                role = role ?? app.role;
-            }
+        // The pipeline is read every time now, not only for an id: other offers
+        // recorded with pipeline_update belong in the comparison, and the user
+        // shouldn't have to retype a competing offer the tool already holds. Only
+        // an explicit id makes an unreadable pipeline fatal, as before; otherwise
+        // the review goes ahead without the side-by-side.
+        const pipeRead = await guardedRead(() => loadPipeline());
+        if (!pipeRead.ok && applicationId)
+            return pipeRead.response;
+        const pipeline = pipeRead.ok ? pipeRead.value : undefined;
+        const app = pipeline ? findApplication(pipeline, applicationId, company, role) : undefined;
+        if (app) {
+            company = company ?? app.company;
+            role = role ?? app.role;
         }
+        const recorded = pipeline ? otherRecordedOffers(pipeline, app?.id) : [];
+        const deadlineOffer = app && !app.offer?.expiresDate
+            ? `\nEnd your reply with one offer: if the offer letter or the user gives a deadline, save it with \`pipeline_update\` ` +
+                `(applicationId \`${app.id}\`, \`offerExpiresDate\` as YYYY-MM-DD) so it shows up in their daily digest. Ask first; ` +
+                `write it only with their OK, and never guess a date.\n`
+            : "";
         return {
             content: [{
                     type: "text",
@@ -341,11 +396,11 @@ ${currentComp ? `**Current comp:** ${currentComp}` : ""}
 ${marketData ? `**Market data:**\n${embedUntrusted("market data", marketData)}` : ""}
 ${priorities ? `**My priorities:** ${priorities}` : ""}
 ${otherOffers ? `**Other offers/processes:** ${otherOffers}` : ""}
-
+${recorded.length ? `\n## Other Offers on Record (from the pipeline)\n${offersTable(recorded)}\n` : ""}
 ---
 
 **Instructions for Claude:**
-
+${recorded.length ? `\nPut this offer side by side with the other offers on record above (base, bonus, equity, start, deadline), using only the figures recorded there; a blank cell is unknown, not zero. Weigh the deadlines: an offer that expires first may need an answer or an extension request before the others land.\n` : ""}
 ### 1. Total Compensation Breakdown
 Break down every component with annualized values:
 - Base salary
@@ -386,7 +441,7 @@ Score this offer on: compensation, growth, culture fit, role scope, company traj
 Overall recommendation: Accept / Negotiate / Decline? Put this recommendation and the first thing to negotiate at the very top of your reply, before section 1.
 
 ${RESPONSE_SHAPE}
-
+${deadlineOffer}
 ${MARKET_DATA_RULE}
 
 ${TRUTH_RULE}`,
@@ -448,6 +503,29 @@ export function findApplication(pipeline, applicationId, company, role) {
         return byCompany[0];
     return byCompany.find(a => norm(a.role) === norm(role)) ?? byCompany[0];
 }
+/** Statuses where a recorded offer is still live: on the table or being negotiated. */
+const LIVE_OFFER_STATUSES = new Set(["offer", "negotiating"]);
+/** Every other live offer recorded in the pipeline, newest update first. */
+export function otherRecordedOffers(pipeline, excludeId) {
+    return pipeline.applications
+        .filter(a => a.id !== excludeId && a.offer && LIVE_OFFER_STATUSES.has(a.status))
+        .sort((a, b) => (b.dateUpdated ?? "").localeCompare(a.dateUpdated ?? ""));
+}
+/** Recorded offers as a markdown table. Missing figures stay blank, never zero. */
+export function offersTable(apps) {
+    const fmt = (n, cur) => (n === undefined ? "" : `${cur} ${n.toLocaleString("en-US")}`);
+    // Free-text fields came from the user via pipeline_update; keep a pipe from breaking the table.
+    const cell = (s) => (s ?? "").replace(/\|/g, "/").replace(/\s+/g, " ").trim();
+    const rows = apps.map(a => {
+        const o = a.offer;
+        return `| ${cell(a.company)} (\`${a.id}\`) | ${cell(a.role)} | ${a.status} | ${fmt(o.baseSalary, o.currency)} | ${fmt(o.bonus, o.currency)} | ${cell(o.equity)} | ${cell(o.startDate)} | ${cell(o.expiresDate)} |`;
+    });
+    return [
+        "| Company | Role | Status | Base | Bonus | Equity | Start | Expires |",
+        "|---|---|---|---|---|---|---|---|",
+        ...rows,
+    ].join("\n");
+}
 /** The posted pay range saved on the application, as a context line, or nothing. */
 function salaryLine(app) {
     const r = app.salaryRange;
@@ -475,9 +553,10 @@ function buildTimeline(rounds, journal) {
         const tags = e.signals.length ? ` _[${e.signals.join(", ")}]_` : "";
         const mood = e.sentiment ? ` (${e.sentiment})` : "";
         const detail = e.detail ? ` — ${e.detail}` : "";
+        const inferred = e.origin === "inferred" ? ` ${INFERRED_TAG}` : "";
         items.push({
             key: dateKey(day),
-            line: `- **Signal — ${e.type}** (${day || "date not recorded"}) — ${e.summary}${detail}${tags}${mood}`,
+            line: `- **Signal — ${e.type}** (${day || "date not recorded"}) — ${e.summary}${detail}${tags}${mood}${inferred}`,
         });
     }
     return items
@@ -485,6 +564,20 @@ function buildTimeline(rounds, journal) {
         .sort((a, b) => (a.item.key < b.item.key ? -1 : a.item.key > b.item.key ? 1 : a.i - b.i))
         .map(({ item }) => item.line)
         .join("\n");
+}
+/**
+ * The saved stories this process has already heard, grouped by round, so the
+ * arc can say "the panel heard the turnaround story from you; Priya heard the
+ * vendor one" and steer the next round elsewhere. "" when none are recorded.
+ */
+export function storiesToldInProcess(career, audience) {
+    const byRound = new Map();
+    for (const { story, use } of storiesAlreadyHeard(career, audience)) {
+        const round = [use.round, use.date].filter(Boolean).join(", ") || "round not recorded";
+        const line = `"${story.title}"${use.interviewer ? ` to ${use.interviewer}` : ""}`;
+        byRound.set(round, [...(byRound.get(round) ?? []), line]);
+    }
+    return [...byRound.entries()].map(([round, lines]) => `- **${round}:** ${lines.join("; ")}`).join("\n");
 }
 /**
  * Compact career context for the arc projection.
