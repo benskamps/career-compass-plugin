@@ -92,7 +92,7 @@ jobs:
             | HOME="$RUNNER_TEMP/home" timeout 20 node server/build/src/index.js > "$RUNNER_TEMP/out.jsonl" || true
           count=$(grep '"id":2' "$RUNNER_TEMP/out.jsonl" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).result.tools.length))')
           echo "tools: $count"
-          test "$count" -eq 18
+          test "$count" -eq 19
           # Server instructions are what Claude Code loads at session start when tool search
           # defers the tools, and it cuts them at 2,048 characters.
           grep '"id":1' "$RUNNER_TEMP/out.jsonl" | node -e '

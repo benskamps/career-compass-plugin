@@ -101,7 +101,7 @@ registry, only when you ask for them, and neither carries your data:
 - **Update check:** the `check_setup` tool can ask the registry for the latest published
   version. It is off by default; Claude turns it on when you ask whether there is an update.
 - **The optional web dashboard:** if you ask to open it, it starts with
-  `npx -y career-compass-mcp@2.9.8 dashboard`, which downloads that exact version from the
+  `npx -y career-compass-mcp@2.9.9 dashboard`, which downloads that exact version from the
   registry. The dashboard itself serves pages only to your own machine.
 
 Files stay until you delete them, apart from older backups: only the newest 5 `.bak` files
@@ -120,14 +120,14 @@ covering collection, storage, sharing, retention, and contact details, is at
   commands above.
 
 <details>
-<summary><b>The eighteen tools</b></summary>
+<summary><b>The nineteen tools</b></summary>
 
 Read tools only read your files; write tools ask before changing them.
 
 | Area | Tools |
 |------|-------|
 | Find and assess a role | `explore_opportunity`, `research_company` |
-| Apply | `tailor_resume`, `generate_cover_letter`, `format_for_ats` |
+| Apply | `tailor_resume`, `generate_cover_letter`, `format_for_ats`, `answer_application` |
 | Track the pipeline | `pipeline_view`, `pipeline_add` (write), `pipeline_update` (write), `classify_email` |
 | Interview and decide | `prepare_interview`, `interview_arc`, `evaluate_offer`, `generate_rejection_response` (write) |
 | Feed the knowledge base | `save_career_section` (write), `ingest_document`, `capture_insight` (write), `harvest_evidence` |
@@ -140,7 +140,7 @@ Full documentation: <https://github.com/benskamps/career-compass-mcp#readme>
 ## Source
 
 The code in `server/` is the compiled output of
-[career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.9.8, plus the files the
+[career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.9.9, plus the files the
 server loads from its runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `yaml`, and
 what they depend on), copied unmodified. `BUNDLE.md` lists where each file came from and how to rebuild it.
 CI checks every rebuilt bundle with `claude plugin validate --strict`, starts the server, and
