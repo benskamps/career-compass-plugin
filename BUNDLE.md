@@ -1,9 +1,9 @@
 # Where server/ comes from
 
 Built from the npm package
-[career-compass-mcp@2.9.9](https://www.npmjs.com/package/career-compass-mcp/v/2.9.9), the same tarball
-`npx career-compass-mcp@2.9.9` installs. Its source is
-[v2.9.9 in career-compass-mcp](https://github.com/benskamps/career-compass-mcp/tree/v2.9.9).
+[career-compass-mcp@2.10.0](https://www.npmjs.com/package/career-compass-mcp/v/2.10.0), the same tarball
+`npx career-compass-mcp@2.10.0` installs. Its source is
+[v2.10.0 in career-compass-mcp](https://github.com/benskamps/career-compass-mcp/tree/v2.10.0).
 
 - Nothing is minified, bundled into one file, or edited. Each file under `server/build` and
   `server/node_modules` is byte-for-byte identical to that release after
@@ -20,9 +20,9 @@ Built from the npm package
   - `yaml@2.9.1` (ISC)
   - `zod@4.6.5` (MIT)
   - `zod-to-json-schema@3.25.2` (ISC)
-- 395 files in the plugin in total.
+- 397 files in the plugin in total.
 
-To check it yourself: install `career-compass-mcp@2.9.9` with `npm install --omit=dev` and
+To check it yourself: install `career-compass-mcp@2.10.0` with `npm install --omit=dev` and
 compare any file under `server/` with the same path in that install. The build script that
 produces this repository is
 [scripts/build-plugin-bundle.mjs](https://github.com/benskamps/career-compass-mcp/blob/main/scripts/build-plugin-bundle.mjs)

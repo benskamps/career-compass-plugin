@@ -12,6 +12,7 @@ import { registerPrompts } from "./prompts/index.js";
 import { PKG_VERSION } from "./version.js";
 import { SERVER_INSTRUCTIONS } from "./server-instructions.js";
 import { unreadableCareerSections } from "./storage/file-store.js";
+import { installWelcomeBack } from "./tools/welcome-back.js";
 export function createServer(options = {}) {
     const server = new McpServer({
         name: "career-compass",
@@ -22,6 +23,9 @@ export function createServer(options = {}) {
         instructions: SERVER_INSTRUCTIONS,
     });
     noticeUnreadableSections(server);
+    // A return visit opens with what changed while the user was away: digest
+    // items they haven't seen and last time's loose ends. See tools/welcome-back.ts.
+    installWelcomeBack(server);
     // Resources — Career KB + Pipeline
     registerCareerResources(server);
     // …and their live half: subscribe to a resource and the server tells you when
