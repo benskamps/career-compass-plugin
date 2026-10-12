@@ -4,7 +4,7 @@ import { guardedRead } from "./read-guard.js";
 import { formatSignalDigest } from "./signal-digest.js";
 import { embedUntrusted } from "../untrusted.js";
 import { noCareerDataMessage } from "../empty-state.js";
-import { TRUTH_RULE } from "./truth-rule.js";
+import { TRUTH_RULE, AI_POLICY_RULE } from "./truth-rule.js";
 import { formatRoles, formatAchievements, formatCredentials, formatProjects, narrativeBlock } from "./career-context.js";
 import { KB_OVER_PASTED, PASTED_RESUME_CLOSE, workFromPastedResume } from "./opportunity.js";
 export function registerResumeTools(server) {
@@ -109,6 +109,8 @@ ${format === "functional" ? `1. Header
 
 Output the full resume text first, ready to copy, then a short "Keyword Match Report" showing which posting requirements are covered and which aren't, then any [confirm: ...] questions in one list.
 ${fromPasted ? `\n${PASTED_RESUME_CLOSE}\n` : ""}
+${AI_POLICY_RULE}
+
 ${TRUTH_RULE}`,
                 }],
         };
@@ -215,6 +217,8 @@ ${tone === "concise" ? "Every sentence earns its place. Max 250 words total." : 
 
 Keep it under 400 words. Make it feel human, not templated, through plain specific language rather than invented story: each sentence about me is either a fact from the Career KB or a plain statement of what I would bring or want. No scenes, causes, surprises, or lessons the Career KB doesn't give ("when results were stuck", "I didn't call it that at the time"), no "I've always…", and no claims about how I work today unless I am working today.
 
+${AI_POLICY_RULE}
+
 ${TRUTH_RULE}`,
                 }],
         };
@@ -292,6 +296,8 @@ Answer every question, in order, in my voice. Under each answer show its length 
 - After the answers, one line counting the placeholders: "3 things to confirm before submitting: work authorization, salary, Epic years." No line when there are none.
 - Then one offer: when I fill in a narrative answer (work authorization, why I'm leaving, a gap), save it verbatim to \`narrative\` with save_career_section so the next form reuses it. Write nothing without my OK.
 ${fromPasted ? `\n${PASTED_RESUME_CLOSE}\n` : ""}
+${AI_POLICY_RULE}
+
 ${TRUTH_RULE}`,
                 }],
         };
@@ -365,15 +371,24 @@ export const ATS_HYGIENE = `**Parsing hygiene (true for every applicant system):
 - One date format, used the same way for every role
 - Contact details in the body, not in a page header or footer
 - If you upload a PDF, use a text-based one (exported from a document, not scanned), so the text can be selected
-- Field length limits vary by employer; check the form rather than trusting a fixed number`;
+- Keep the file small; Greenhouse's help center says files over 2.5 MB aren't parsed at all
+- Field length limits vary by employer; check the form rather than trusting a fixed number
+- A failed parse doesn't reject you, it leaves your profile half empty for the recruiter and any match grade, so check what the form pre-filled
+- Screening questions (work authorization, location, licenses, years) are where applicant systems can reject automatically, so answer them carefully and truthfully`;
 const ATS_SYSTEM_NAME = {
     workday: "Workday", greenhouse: "Greenhouse", lever: "Lever", linkedin: "LinkedIn Easy Apply",
     icims: "iCIMS", taleo: "Taleo", smartrecruiters: "SmartRecruiters", generic: "Any system",
 };
 /** One neutral, checkable note per system: how the form usually asks, not how its parser supposedly behaves. */
+// The documented items below come from the vendors' own help pages, read 2026-10-12:
+// Workday Administrator Guide (résumé parsing: "depends on resume layout and word order", no
+// auto-fill of Skills or Languages); Greenhouse Support "Unsuccessful resume parse" (tables,
+// columns, headers/footers, graphics, letter spacing, image-only files, >2.5 MB) and
+// "Application rules" (Auto-Reject on custom questions). Sources: project research page
+// "After You Click Submit".
 export const ATS_SYSTEM_NOTES = {
-    workday: "Workday usually asks you to re-enter each role in its own form (title, company, dates, description), even after a résumé upload, so a per-role breakdown saves time.",
-    greenhouse: "Greenhouse usually takes a résumé upload plus separate fields for links and any custom questions the employer added; those questions differ by company.",
+    workday: "Workday usually asks you to re-enter each role in its own form (title, company, dates, description), even after a résumé upload, so a per-role breakdown saves time. Workday's own docs say parsing depends on layout and word order and doesn't fill the Skills field, so add skills there by hand.",
+    greenhouse: "Greenhouse usually takes a résumé upload plus separate fields for links and any custom questions the employer added; those questions differ by company, and Greenhouse lets employers auto-reject on their answers. Its help center lists tables, columns, headers and footers, graphics, unusual letter spacing and image-only files as parse failures.",
     lever: "Lever usually takes a résumé upload, separate fields for links, and an optional additional-information box.",
     linkedin: "Easy Apply attaches a résumé file and may pre-fill answers from your LinkedIn profile, so check the pre-filled answers match the résumé.",
     icims: "iCIMS often asks for work history field by field after the upload; check what it pre-filled from the parse.",
