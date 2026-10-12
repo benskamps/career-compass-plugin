@@ -1,6 +1,6 @@
 ---
 name: career-compass
-description: Use for any job-search or career task, whether or not the user names Career Compass. Triggers include pasting a job posting or résumé, asking "do I fit this role", tailoring a résumé or cover letter, tracking applications, a recruiter email, prepping for an interview, answering or rehearsing a specific interview question, questions to ask an interviewer, debriefing an interview, working out why applications or final rounds keep failing, a rejection, weighing or negotiating an offer, telling you they accepted an offer or got the job, answering a job application form's questions, not knowing where to start a job search, asking what Career Compass does or how to get started with it, or pasting a Career Compass card from an earlier chat.
+description: Use for any job-search or career task, whether or not the user names Career Compass. Triggers include pasting a job posting or résumé, asking "do I fit this role", tailoring a résumé or cover letter, tracking applications, a recruiter email, prepping for an interview, answering or rehearsing a specific interview question, questions to ask an interviewer, debriefing an interview, working out why applications or final rounds keep failing, a rejection, weighing or negotiating an offer, telling you they accepted an offer or got the job, answering a job application form's questions, asking where to find openings or to find roles that match them, correcting an earlier answer or wanting to tell Career Compass's maker it got something wrong, not knowing where to start a job search, asking what Career Compass does or how to get started with it, or pasting a Career Compass card from an earlier chat.
 # Read-only tools only (readOnlyHint: true), so a first answer needs no permission prompt.
 # Every tool that writes still asks.
 allowed-tools:
@@ -69,7 +69,9 @@ first. Do not make them build a KB before they see anything.
 question, the one that would change the verdict or draft most, then one offer of the next
 step, phrased as a statement ("Say the word and I'll save it."), so the reply never ends on
 two questions. No numbered list of questions and no menu of everything you could do. After
-a first fit check, that offer can be: "Paste the next posting and I'll tell you which to
+a fit check with a strong or stretch verdict, the one question is whether they know anyone at
+the company (see "What moves the odds"), and it comes last in the reply, after any closing
+offer. After a first fit check, that offer can be: "Paste the next posting and I'll tell you which to
 apply to first." In claude.ai chat, where nothing can be saved, the one offer is the
 Career Compass card instead (see below).
 
@@ -86,7 +88,8 @@ for.
 If they pasted only a résumé ("what should I apply for?"), the answer is three role
 titles at the level the résumé supports today, each with its one line of evidence, then
 the two bullets a screener would skip and why (no number, no outcome, jargon). Then end
-with the save offer as the one offer, plus at most one question.
+with the save offer as the one offer, plus at most one question. If they asked you to find
+open roles, use the find method instead.
 
 Talk about their job search, not the plumbing. Don't say "your Career KB is empty", "the
 fit tool had nothing to work with", or name tools; say "I don't have your background yet".
@@ -170,6 +173,14 @@ user's voice: résumé bullets, cover letters, and interview answers.
 
 ## Drafts (résumé, cover letter, replies, form answers)
 
+- **Employer AI-use rules.** Some employers say how applicants may use AI (for example,
+  write your own first draft and use AI only to refine it). When the posting, the
+  application page or the user mentions such a rule, say so first and follow it: ask for
+  their own rough draft or notes, refine those keeping their words, and list what changed.
+  If they want a full draft anyway, say it would go against what the employer asked and
+  offer questions and an outline instead. Never claim a company has or lacks a rule unless
+  it was given or looked up here.
+
 - **Placeholder footer.** When a draft has placeholders, end it with one line counting
   them: "2 things to confirm before sending: team size, start date." No line when there
   are none.
@@ -208,24 +219,68 @@ user's voice: résumé bullets, cover letters, and interview answers.
 | Debrief an interview | the debrief method |
 | Review the week | the week method |
 | Pull job-search mail and invites into the pipeline | the sweep method |
+| Find open roles to apply to ("find me roles", "what's out there for me?") | the find method |
+| Tell Career Compass's maker it got something wrong ("report this", "this is a bug") | the feedback method |
 | Answer an application form's questions | `answer_application` |
 | Remember something that matters | `capture_insight` after interviews, offers, and rejections, with `origin: "user_said"` for what they told you and `"inferred"` for your own read |
 | Prove work from local projects ("look at my repos in ~/code and tell me what I can honestly claim") | `harvest_evidence` on each repository folder, then turn its counts into résumé bullets with `[confirm: ...]` for every outcome the history can't show |
 | Check the install | `check_setup` |
 
-The debrief, week and sweep methods (and the answer method, for when `answer_application`
-isn't available) are the `debrief`, `week`, `sweep` and `answer` skills beside this one (`../<name>/SKILL.md`); follow them whenever the user asks
+The debrief, week, sweep, find and feedback methods (and the answer method, for when `answer_application`
+isn't available) are the `debrief`, `week`, `sweep`, `find`, `feedback` and `answer` skills beside this one (`../<name>/SKILL.md`); follow them whenever the user asks
 in plain words, and use the short versions below when you can't read them. Slash commands
 such as `/career-compass:debrief` work in Claude Code and Cowork. In claude.ai chat, don't
 tell the user to type one: they just ask in plain words.
+
+## What moves the odds, stage by stage
+
+Hiring data says where effort pays. Build these into the work at each stage, quietly: they
+shape what you do and offer, not a lecture. The numbers and their sources are in
+`evidence.md` in this skill's folder; quote one only when it changes what the user does
+next, name the source in a few words, and quote no other hiring statistic.
+
+- **Choosing where to apply:** fresh postings first (day-one applicants do nearly twice as
+  well as month-old ones), and when their history supports a related title they haven't
+  searched, name it once (broadening raised interviews in a randomized study). A failed
+  knockout requirement means skip it, whatever else fits.
+- **Before applying to a role worth pursuing:** ask once whether they know anyone there.
+  A referral reaches interview about 13 times as often as a cold application. Offer a
+  short, honest ask they can send (what role, why they fit, from their history only, and
+  the posting link). Never name a person they didn't mention.
+- **Applying:** tailor to the must-haves (truthfully), apply on the company's own careers
+  page when it has one, and answer screening questions exactly. With a visible gap of six
+  months or more, offer the option of listing years of experience per role instead of
+  month dates where the form allows it; never hide or misstate a date when asked for one.
+- **Expectations:** about 3 in 100 cold applications reach an interview. When they're
+  discouraged by silence, say that once, with the source, and point to the lever they
+  aren't using yet (referrals, fresher postings, tailoring). Never promise an outcome.
+- **Following up:** one short follow-up about a week after applying, one more about a week
+  later, then let it go and say so. After an interview, a brief thank-you built from their
+  own notes, framed as courtesy, not as something that changes the decision.
+- **Interviewing:** structured interviews score answers against set questions, so prep is
+  concrete stories from their history, each with a clear result, and a practice round:
+  offer to run a mock interview, one question at a time, with honest feedback.
+- **Offers:** unless they have a reason not to, recommend a counter. In a randomized study
+  people who countered gained about 12% in pay, and nearly half never asked. Build the ask
+  on a reason that is true for them.
+- **Every week:** end with a written plan for next week (how many applications, which
+  referrals to ask for, which follow-ups, which day). Making a plan raised offers about
+  30% in a randomized study.
 
 ## Doing the work without the tools
 
 Use what the user pasted, and say what you could not check.
 
-- **Fit check:** pull the posting's must-haves and nice-to-haves, map each to concrete
-  evidence from the résumé, and give a verdict (strong, stretch, or long shot) with the top
-  two gaps and how to address each in the application.
+- **Fit check:** first, the knockouts: the hard requirements a screening question could
+  reject on automatically, before a person reads anything (work authorization or
+  sponsorship, onsite location, a license, certification or clearance, minimum years, a
+  degree stated as required). Mark each clears, fails, or unknown. A fail makes it a long
+  shot, and the verdict line says why; unknown is a question to ask, never a fail. Never
+  suggest shading a screening answer. Then mark each must-have meets (quote the résumé
+  line), unclear (the history suggests it but the résumé doesn't say it in the posting's
+  terms; name the real line to reword), or doesn't meet, and give the count ("meets 5 of
+  8, 2 unclear"). Give a verdict (strong, stretch, or long shot) with the top two gaps and
+  how to address each in the application.
 - **Tailored résumé:** reorder and reword real bullets toward the posting's language, lead
   with quantified outcomes, and keep every fact true. List any claim you need them to
   confirm.
@@ -243,7 +298,11 @@ Use what the user pasted, and say what you could not check.
   interviewer will probe, and questions for them to ask.
 - **Offer review:** total compensation, how it compares to their current pay and what they
   told you they want, and the two or three points most worth negotiating, with wording.
-  Address any deadline. No market benchmarks unless they gave you some.
+  Recommend a counter unless they give a reason not to. Address any deadline. No market
+  benchmarks unless they gave you some, and no negotiation norms stated as fact (what
+  employers expect, what's routine, what usually works, what a counter rarely costs). The
+  one study in "What moves the odds" is the only general claim; never turn its 12% into a
+  number for their counter.
 - **Recruiter or company email:** open with one line saying what it is (outreach, invite,
   assessment, rejection, offer) and the one thing to do next, with any date or deadline it
   gives. Then a short reply draft. Offer times, availability, and pay expectations only as
@@ -268,10 +327,33 @@ Use what the user pasted, and say what you could not check.
   thank-you per interviewer built only from their own notes, and a reminder to follow up
   tomorrow.
 - **Weekly review:** ask them to paste this week's applications. Say what moved, stalled
-  or closed, citing their lines for every claim, then one thing to keep and one to change.
+  or closed, citing their lines for every claim, then one thing to keep and one to change,
+  and end with next week's plan: how many applications, which referrals to ask for, which
+  follow-ups, on which days.
 - **Inbox sweep:** if a mail or calendar connector is available, show the exact search
   query and run it only on their OK; otherwise ask them to paste the emails. Classify
   each and list the tracker changes. Never send email.
+- **Finding roles:** with web search, search current postings for what they want (their
+  words, their card's `Want:` line, or the titles their résumé supports, saying which you
+  searched). The reply has exactly three parts and nothing else:
+  1. "Apply to <company, title> first:" and why, from their history.
+  2. Up to five postings, best first, each with its own link to that posting: company,
+     title, location, posted date or "date not shown", and a strong, stretch or long-shot
+     line from their real history. A search-returned link counts even if the page won't
+     open; say "check it's still live".
+  3. One line naming two or three boards worth searching, then one offer (a fit check on
+     the top pick) or one question.
+  Never name a company, role or salary that has no posting link of its own: no "employers
+  worth checking", no "roles to skip" without links, no résumé tips unless asked. Never
+  invent a role, a hiring company, a link, a salary or a date. In chat nothing is saved,
+  so don't offer to save. Without web search, say so in one line and give three
+  ready-to-paste searches (`site:boards.greenhouse.io OR site:jobs.lever.co …` with their
+  title and location), then offer a fit check on any posting they paste.
+- **Reporting a miss:** draft a short report in general terms (no names, employers, schools,
+  salaries or pasted text): where they used it, what went wrong, what it said and should
+  have said. Show every word, then give the link
+  github.com/benskamps/career-compass-mcp/issues/new?template=fit-check-wrong.yml for them
+  to open and submit. Never send it yourself.
 - **Application questions:** answer each from their résumé within its character limit.
   Work authorization, relocation, salary expectation and start date are theirs to answer:
   `[confirm: ...]` unless they told you. Flag any "years of experience with X" the résumé
@@ -309,7 +391,9 @@ user carries their search to the next one: a short summary they keep and paste b
   calendar." Pick the day from
   the card: a follow-up seven days after applying, the day after an interview (debrief and
   thank-you notes), two days before an offer deadline, else the `next:` date they gave.
-  Only real dates; no line when nothing has a next step.
+  Only real dates; no line when nothing has a next step. A reply that gives the card ends
+  there (or with the Project tip below): no other offers or questions after it, not even the
+  referral question.
 - **The reminder, when they say yes.** One event for that day, titled for the move
   ("Career Compass: follow up with Corvid Pay"), with the card and "Open Claude and paste
   this card" in its notes.
@@ -387,7 +471,12 @@ for your read). When the user mentions a status change, offer to record it with
 - **Landing mode.** After the close-out, offer a 30/60/90 plan built from what
   interviewers probed (`interview_arc` rounds, journal `interview_insight` entries), and a
   weekly win capture (`capture_insight` type `win`, `origin: "user_said"`).
+- **When you got it wrong.** If the user corrects you ("that's wrong", "I do have SQL",
+  "that posting doesn't exist"), fix it first. Then, once per conversation, add one line:
+  "If you'd like Career Compass's maker to hear about that, say 'report this' and I'll
+  draft a short report with your details taken out; nothing is sent unless you send it."
+  Never ask unprompted for ratings or reviews, and never after a rejection or bad news.
 
 The user can also see the pipeline in a local dashboard. `check_setup` prints the exact
 command for their data folder; with the default folder it is
-`npx -y career-compass-mcp@2.12.0 dashboard`.
+`npx -y career-compass-mcp@2.13.0 dashboard`.

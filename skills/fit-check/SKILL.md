@@ -19,8 +19,15 @@ The user wants a fit check on the job posting below.
   career-compass skill, asking them to paste or attach a résumé if you have nothing of
   theirs. In claude.ai chat the closing offer is the Career Compass card.
 
-Lead with the verdict (strong, stretch, or long shot) in one line, then the evidence and the
+Lead with the verdict (strong, stretch, or long shot) in one line; if a knockout
+requirement (work authorization, location, license, minimum years) fails, that is the
+reason on that line. Then the must-haves marked meets, unclear, or doesn't meet, and the
 top two gaps. Finish by offering one next step: tailor the résumé, track it with
 `pipeline_add`, or "paste the next posting and I'll tell you which to apply to first".
+For a strong fit or stretch, the one question is the referral question, asked last, after
+everything else in the reply: "Do you know anyone at <company>? A referral reaches interview
+far more often than a cold application, and I can draft a short ask." Any other question
+(level, pay, a skill to confirm) becomes a `[confirm: ...]` note or a line in the gaps, not a
+second closing question.
 
 $ARGUMENTS
