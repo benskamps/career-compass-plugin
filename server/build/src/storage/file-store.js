@@ -687,9 +687,4 @@ export async function mutatePipeline(mutator) {
         return result;
     }));
 }
-// ─── Initialization ───────────────────────────────────────────────────────────
-export async function ensureDataDirs() {
-    await mkdir(careerDir(), { recursive: true, mode: PRIVATE_DIR_MODE });
-    await mkdir(pipelineDir(), { recursive: true, mode: PRIVATE_DIR_MODE });
-}
 //# sourceMappingURL=file-store.js.map
