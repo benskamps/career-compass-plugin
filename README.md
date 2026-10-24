@@ -144,7 +144,7 @@ and writes nothing.
 
 The server makes no network requests. One thing can reach the public npm registry, only
 when you ask for it, and it carries none of your data: the optional web dashboard. If you
-ask to open it, it starts with `npx -y career-compass-mcp@2.15.0 dashboard`, which downloads
+ask to open it, it starts with `npx -y career-compass-mcp@2.15.1 dashboard`, which downloads
 that exact version from the registry. The dashboard itself serves pages only to your own
 machine.
 
@@ -184,7 +184,7 @@ Full documentation: <https://github.com/benskamps/career-compass-mcp#readme>
 ## Source
 
 The code in `server/` is the compiled output of
-[career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.15.0, plus the files the
+[career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.15.1, plus the files the
 server loads from its runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `yaml`, and
 what they depend on), copied unmodified. `BUNDLE.md` lists where each file came from and how to rebuild it.
 CI checks every rebuilt bundle with `claude plugin validate --strict`, starts the server, and
