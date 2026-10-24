@@ -60,13 +60,36 @@ jobs:
           echo "build=$build" >> "$GITHUB_OUTPUT"
 
       # The release's own source (skill, icon, privacy policy), plus the current build script
-      # from the default branch, so a release tagged before a script fix still builds.
+      # from the default branch, so a release made before a script fix still builds.
+      #
+      # The source commit comes from the gitHead field npm records at publish time, so a
+      # release needs no v<version> tag. The tag is only a fallback for a package published
+      # without one. Either way, the commit's package.json has to name the same version.
       - name: Fetch career-compass-mcp
+        id: src
         if: steps.v.outputs.build == 'true'
         env:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
-          git clone --quiet --depth 1 --branch "v$VERSION" https://github.com/benskamps/career-compass-mcp "$RUNNER_TEMP/mcp"
+          repo=https://github.com/benskamps/career-compass-mcp
+          sha="$(npm view "career-compass-mcp@$VERSION" gitHead 2>/dev/null || true)"
+          git init --quiet "$RUNNER_TEMP/mcp"
+          git -C "$RUNNER_TEMP/mcp" remote add origin "$repo"
+          if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Source: gitHead $sha"
+            git -C "$RUNNER_TEMP/mcp" fetch --quiet --depth 1 origin "$sha"
+          else
+            echo "::warning::npm has no gitHead for $VERSION; falling back to tag v$VERSION"
+            git -C "$RUNNER_TEMP/mcp" fetch --quiet --depth 1 origin "refs/tags/v$VERSION"
+          fi
+          git -C "$RUNNER_TEMP/mcp" checkout --quiet --detach FETCH_HEAD
+          sha="$(git -C "$RUNNER_TEMP/mcp" rev-parse HEAD)"
+          at="$(node -p "require('$RUNNER_TEMP/mcp/package.json').version")"
+          if [ "$at" != "$VERSION" ]; then
+            echo "::error::Commit $sha has package.json version $at, not $VERSION"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
           git -C "$RUNNER_TEMP/mcp" fetch --quiet --depth 1 origin main
           git -C "$RUNNER_TEMP/mcp" show FETCH_HEAD:scripts/build-plugin-bundle.mjs > "$RUNNER_TEMP/mcp/scripts/build-plugin-bundle.mjs"
 
@@ -80,7 +103,14 @@ jobs:
         if: steps.v.outputs.build == 'true'
         env:
           CC_SOURCE_DIR: ${{ runner.temp }}/mcp
-        run: node "$RUNNER_TEMP/mcp/scripts/build-plugin-bundle.mjs" "${{ steps.v.outputs.version }}"
+          VERSION: ${{ steps.v.outputs.version }}
+          SHA: ${{ steps.src.outputs.sha }}
+        run: |
+          node "$RUNNER_TEMP/mcp/scripts/build-plugin-bundle.mjs" "$VERSION"
+          # The script links the source as tree/v<version>. Point it at the commit instead,
+          # which exists whether or not the release was tagged.
+          sed -i "s#/tree/v$VERSION)#/tree/$SHA)#g" BUNDLE.md
+          grep -q "/tree/$SHA)" BUNDLE.md
 
       - name: Smoke-test the bundled server
         if: steps.v.outputs.build == 'true'
@@ -130,6 +160,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.v.outputs.version }}
+          SHA: ${{ steps.src.outputs.sha }}
         run: |
           if [ -z "$(git status --porcelain)" ]; then
             echo "Already matches $VERSION; nothing to do."
@@ -139,7 +170,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "bundle/v$VERSION"
           git add -A
-          git commit -m "Bundle career-compass-mcp $VERSION"
+          git commit -m "Bundle career-compass-mcp $VERSION" -m "Source: benskamps/career-compass-mcp@$SHA (npm gitHead)"
           git push -u origin "bundle/v$VERSION"
           gh pr create --title "Bundle career-compass-mcp $VERSION" \
-            --body "Rebuilt server/ from career-compass-mcp@$VERSION on npm with scripts/build-plugin-bundle.mjs from career-compass-mcp. See BUNDLE.md."
+            --body "Rebuilt server/ from career-compass-mcp@$VERSION on npm (source commit $SHA) with scripts/build-plugin-bundle.mjs from career-compass-mcp. See BUNDLE.md."
