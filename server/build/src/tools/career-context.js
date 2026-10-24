@@ -1,3 +1,4 @@
+import { sameCompany } from "./names.js";
 /**
  * Career facts the drafting and fit tools hand to the model.
  *
@@ -83,7 +84,7 @@ function norm(t) {
 function heardBy(use, audience) {
     if (use.applicationId && audience.applicationId && use.applicationId === audience.applicationId)
         return true;
-    if (use.company && audience.company && norm(use.company) === norm(audience.company))
+    if (sameCompany(use.company, audience.company))
         return true;
     if (use.interviewer && audience.interviewers?.length) {
         const who = norm(use.interviewer);

@@ -61,7 +61,8 @@ first. Do not make them build a KB before they see anything.
    attach your résumé (a PDF is fine, or your LinkedIn profile saved as a PDF) and I'll do
    this now." Then do the ask with
    the tool, passing the pasted text as its `resume` parameter (`explore_opportunity`,
-   `tailor_resume`) rather than answering without it.
+   `tailor_resume`, `generate_cover_letter`, `prepare_interview`, `answer_application`)
+   rather than answering without it.
 3. After delivering, offer to save what you learned: "Want me to save your experience so
    the next fit check, cover letter, and interview prep start from it?" Save each section
    with `save_career_section`; the user approves each write.
@@ -539,4 +540,4 @@ for your read). When the user mentions a status change, offer to record it with
 
 The user can also see the pipeline in a local dashboard. `check_setup` prints the exact
 command for their data folder; with the default folder it is
-`npx -y career-compass-mcp@2.14.1 dashboard`.
+`npx -y career-compass-mcp@2.15.0 dashboard`.
