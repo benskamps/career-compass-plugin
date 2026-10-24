@@ -1,5 +1,6 @@
 import { statusRank } from "../schemas/career-schema.js";
 import { computeStats, countWord, endedAfterSamePattern } from "../pipeline-stats.js";
+import { sameCompany } from "./names.js";
 /**
  * Today's job-search digest: what `pipeline_view action=next_actions` returns,
  * and what `/career-compass:today` is built on.
@@ -273,8 +274,7 @@ function landingItem(accepted, apps, career, sinceAccepted, now) {
     const days = calendarDays(now);
     const toStart = days(accepted.offer?.startDate);
     const rounds = accepted.interviewRounds?.length ?? 0;
-    const company = accepted.company.toLowerCase();
-    const insightCount = (career?.journal ?? []).filter((e) => e.type === "interview_insight" && (e.applicationId === accepted.id || (e.company ?? "").toLowerCase() === company)).length;
+    const insightCount = (career?.journal ?? []).filter((e) => e.type === "interview_insight" && (e.applicationId === accepted.id || sameCompany(e.company, accepted.company))).length;
     const probed = rounds || insightCount
         ? `what your interviewers probed (${[rounds ? `${rounds} round${rounds === 1 ? "" : "s"}` : "", insightCount ? `${insightCount} interview note${insightCount === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")} on file for ${accepted.company})`
         : "what you remember your interviewers probing";

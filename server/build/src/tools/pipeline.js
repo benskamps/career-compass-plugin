@@ -11,6 +11,7 @@ import { isReadOnlyStore } from "../storage/read-only-error.js";
 import { ACTIVE_STATUSES, computeStats, patternLines } from "../pipeline-stats.js";
 import { buildTodayDigest, nextOnBoard, nextOnBoardLine } from "./today-digest.js";
 import { clockNow } from "../clock.js";
+import { normalizeName } from "./names.js";
 // ─── Status validation ────────────────────────────────────────────────────────
 /**
  * Statuses a search is still live in — everything before `accepted`.
@@ -67,15 +68,8 @@ function transitionRefusal(from, to) {
     return null;
 }
 // ─── Matching ─────────────────────────────────────────────────────────────────
-const COMPANY_SUFFIXES = /\b(inc|incorporated|llc|ltd|limited|corp|corporation|co|company|gmbh|plc|pbc)\b/g;
-/** "Acme, Inc." and "acme" are one company; "Sr. PM" and "sr pm" are one role. */
-export function normalizeName(s, kind = "role") {
-    let t = s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/&/g, " and ");
-    t = t.replace(/[^\p{L}\p{N}]+/gu, " ");
-    if (kind === "company")
-        t = t.replace(COMPANY_SUFFIXES, " ");
-    return t.replace(/\s+/g, " ").trim();
-}
+// Shared with every tool that looks an application up by name; see names.ts.
+export { normalizeName };
 /** An application already tracked for this company and role, if any. */
 export function findDuplicate(apps, company, role) {
     const c = normalizeName(company, "company");

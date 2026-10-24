@@ -1,3 +1,4 @@
+import { normalizeName } from "./names.js";
 /**
  * The tag every drafting surface puts on a journal entry Claude inferred rather
  * than heard. `capture_insight` stores `origin: "inferred"` for a reading like
@@ -6,9 +7,9 @@
  * every renderer uses the same words.
  */
 export const INFERRED_TAG = "(Claude's inference — a hypothesis, not a fact about the user)";
-/** Same normalization `findApplication` uses: "Veridian Health, Inc." ≈ "veridian health inc". */
+/** Same normalization `findApplication` uses: "Veridian Health, Inc." ≈ "veridian health". */
 export function normCompany(name) {
-    return name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    return normalizeName(name, "company");
 }
 /** One journal line, as the digest renders it. */
 export function formatJournalLine(e) {
