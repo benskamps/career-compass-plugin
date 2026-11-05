@@ -134,19 +134,29 @@ jobs:
               if (text.length > 2048) { console.log(`::error::server instructions are ${text.length} chars; Claude Code truncates at 2048`); process.exit(1); }
             });'
 
-      # Cowork skips an MCP server whose userConfig option has no default, so the data
-      # folder option has to keep one.
-      - name: Check the data folder option keeps its default
+      # Since 2.15.2 the plugin declares no userConfig: the directory's policy scan read
+      # the data folder option as "uses a credential from the user's machine". Cowork also
+      # skips an MCP server whose userConfig option has no default, so any option that
+      # comes back must keep one.
+      - name: Check userConfig options keep a default and .mcp.json passes no env
         if: steps.v.outputs.build == 'true'
         run: |
           node -e '
             const p = require("./.claude-plugin/plugin.json");
-            const d = p.userConfig && p.userConfig.data_path && p.userConfig.data_path.default;
-            if (typeof d !== "string" || d.trim() === "") {
-              console.log("::error::plugin.json userConfig.data_path.default is not set");
-              process.exit(1);
+            for (const [k, o] of Object.entries(p.userConfig || {})) {
+              if (typeof o.default !== "string" || o.default.trim() === "") {
+                console.log(`::error::plugin.json userConfig.${k} has no default`);
+                process.exit(1);
+              }
             }
-            console.log(`userConfig.data_path.default: ${d}`);'
+            const m = require("./.mcp.json");
+            for (const [name, srv] of Object.entries(m.mcpServers)) {
+              if (srv.env && Object.keys(srv.env).length) {
+                console.log(`::error::.mcp.json passes env to ${name}; the directory scan flags it`);
+                process.exit(1);
+              }
+            }
+            console.log(`userConfig options: ${Object.keys(p.userConfig || {}).length}; env: none`);'
 
       # The same validator the directory runs. --strict fails on warnings too, such as an
       # unrecognized manifest field. Pinned so a CLI release can't change the verdict
