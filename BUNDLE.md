@@ -1,6 +1,6 @@
 # Where this plugin comes from
 
-Built from [v2.15.2 in career-compass-mcp](https://github.com/benskamps/career-compass-mcp/tree/v2.15.2).
+Built from [v2.16.0 in career-compass-mcp](https://github.com/benskamps/career-compass-mcp/tree/cf8755f5fdcba844d09bf89c649085e5eb502a29).
 
 - The plugin is skills only: `skills/`, the icon, the manifest, LICENSE and the privacy
   policy. There is no MCP server, no `.mcp.json`, and no program that runs on your
