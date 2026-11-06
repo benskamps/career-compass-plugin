@@ -170,7 +170,7 @@ YAML you can open, back up, or delete.
 ## Source
 
 The skills are copied unmodified from
-[career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.15.2.
+[career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.16.0.
 `BUNDLE.md` says which commit and how to rebuild it. CI checks every rebuilt bundle with
 `claude plugin validate --strict` before opening a pull request.
 
