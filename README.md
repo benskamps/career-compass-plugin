@@ -17,7 +17,19 @@ In the Claude app or on claude.ai, open **Customize → Plugins**, search for
 | Where | What you get |
 |---|---|
 | **claude.ai chat** (web, desktop, mobile) | The skills only. Paste a résumé and a posting, and Claude does the fit check, tailoring, interview prep, or offer review in the conversation. A short Career Compass card carries your roles and dates into your next chat (keep it in a "Job search" Project and every chat there starts from it), and Claude can put your next follow-up on your calendar. |
-| **Claude Code**, and **Cowork sessions on your computer** | The skills plus the bundled local server, which remembers your history and tracks your applications. Needs **Node.js 22 or newer**. |
+| **Claude Code** and **Cowork** | The same skills, plus the slash commands below. This version saves nothing between sessions. |
+
+**Want it to remember you?** The full version adds a local server that keeps your career
+history and every application as files on your computer. In Claude Code:
+
+```
+/plugin marketplace add benskamps/career-compass-mcp
+/plugin install career-compass@career-compass
+```
+
+It needs **Node.js 22 or newer**. The directory version is skills only because the
+directory accepts plugins that run a program on your computer only from verified
+organizations.
 
 ## Try it now
 
@@ -67,14 +79,14 @@ Once the fit check is done, it carries the whole search:
   written out in full from your own work, and sharp questions to ask them.
 - **Weigh an offer** against your own targets, and get the two or three points worth
   negotiating, with wording.
-- **Turn your git history into résumé evidence:** in Claude Code or Cowork, ask "Look at
+- **Turn your git history into résumé evidence:** with the full version, ask "Look at
   my project in ~/code/my-app and tell me what I can honestly claim on my résumé." It reads
   that project's git history on your computer, reports what you measurably did there with
   the command behind each number, and asks what the log can't know before drafting a bullet.
 - **Handle the rest:** recruiter emails, rejections, interview debriefs, application form
   questions, and working out why final rounds keep slipping away.
 
-In Claude Code and Cowork it also remembers you. Your career history and every
+The full version also remembers you. Your career history and every
 application live as plain YAML files on your own computer. Each fit check reads your whole
 record, "prep me for my Veridian final" finds that application with its rounds and
 interviewers, and `/career-compass:today` gives you one "start here" move. There is no
@@ -132,65 +144,35 @@ is welcome in [Discussions](https://github.com/benskamps/career-compass-mcp/disc
 
 ## Privacy Policy
 
-Your data stays on your machine. Career Compass stores your career knowledge base and job
-pipeline as YAML in `~/.career-compass/`. It sends that data nowhere on its own: it is passed only to
-the Claude client you use, and only for the requests you make. When you ask
-`harvest_evidence` to look at a project folder, it reads that folder's git history locally
-and writes nothing.
+This version is skills only. It stores nothing and runs no program: what you paste goes to
+the Claude client you use, for the requests you make, and nowhere else.
 
-The server makes no network requests. One thing can reach the public npm registry, only
-when you ask for it, and it carries none of your data: the optional web dashboard. If you
-ask to open it, it starts with `npx -y career-compass-mcp@2.15.2 dashboard`, which downloads
-that exact version from the registry. The dashboard itself serves pages only to your own
-machine.
+The full version (above) stores your career knowledge base and job pipeline as YAML in
+`~/.career-compass/` on your computer and sends that data nowhere on its own. Its server
+makes no network requests.
 
-Files stay until you delete them, apart from older backups: only the newest 5 `.bak` files
-per data file are kept. Removing the data folder removes everything. The full policy,
+The full policy,
 covering collection, storage, sharing, retention, and contact details, is at
 <https://benskamps.github.io/career-compass-mcp/privacy>. Questions or concerns:
 <https://github.com/benskamps/career-compass-mcp/issues>.
 
 ## Where your files live
 
-In Claude Code and Cowork your history and pipeline are kept in `~/.career-compass/`, as
-plain YAML you can open, back up, or delete. If you changed the old **Career data folder**
-setting before 2.15.2, that setting is gone: move that folder's files into `~/.career-compass/`.
+Nowhere, in this version. With the full version they are in `~/.career-compass/`, as plain
+YAML you can open, back up, or delete.
 
 ## What this plugin installs
 
-- **The Career Compass MCP server**, bundled as readable JavaScript in `server/`. Claude
-  starts it on your computer with Node.js (`.mcp.json`), straight from the plugin folder.
-  Nothing is downloaded when you install or run it. It needs **Node.js 22 or newer**.
 - **Skills** in `skills/`. `career-compass` teaches Claude how to help with any job-search
-  task, delivering an answer first and offering to save it after. The others are the
-  commands above.
-
-<details>
-<summary><b>The nineteen tools</b></summary>
-
-Read tools only read your files; write tools ask before changing them.
-
-| Area | Tools |
-|------|-------|
-| Find and assess a role | `explore_opportunity`, `research_company` |
-| Apply | `tailor_resume`, `generate_cover_letter`, `format_for_ats`, `answer_application` |
-| Track the pipeline | `pipeline_view`, `pipeline_add` (write), `pipeline_update` (write), `classify_email` |
-| Interview and decide | `prepare_interview`, `interview_arc`, `evaluate_offer`, `generate_rejection_response` (write) |
-| Feed the knowledge base | `save_career_section` (write), `ingest_document`, `capture_insight` (write), `harvest_evidence` |
-| Keep the install healthy | `check_setup` |
-
-Full documentation: <https://github.com/benskamps/career-compass-mcp#readme>
-
-</details>
+  task, delivering an answer first. The others are the commands above.
+- Nothing else: no MCP server, no `.mcp.json`, and no program that runs on your computer.
 
 ## Source
 
-The code in `server/` is the compiled output of
-[career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.15.2, plus the files the
-server loads from its runtime dependencies (`@modelcontextprotocol/sdk`, `zod`, `yaml`, and
-what they depend on), copied unmodified. `BUNDLE.md` lists where each file came from and how to rebuild it.
-CI checks every rebuilt bundle with `claude plugin validate --strict`, starts the server, and
-checks its tool count and instructions before opening a pull request.
+The skills are copied unmodified from
+[career-compass-mcp](https://github.com/benskamps/career-compass-mcp) v2.15.2.
+`BUNDLE.md` says which commit and how to rebuild it. CI checks every rebuilt bundle with
+`claude plugin validate --strict` before opening a pull request.
 
 ## License
 

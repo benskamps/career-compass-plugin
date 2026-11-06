@@ -91,14 +91,11 @@ jobs:
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           git -C "$RUNNER_TEMP/mcp" fetch --quiet --depth 1 origin main
-          git -C "$RUNNER_TEMP/mcp" show FETCH_HEAD:scripts/build-plugin-bundle.mjs > "$RUNNER_TEMP/mcp/scripts/build-plugin-bundle.mjs"
+          git -C "$RUNNER_TEMP/mcp" show FETCH_HEAD:scripts/build-plugin-skills.mjs > "$RUNNER_TEMP/mcp/scripts/build-plugin-skills.mjs"
 
-      # esbuild only traces which files the server loads; see the script's header.
-      - name: Install esbuild
-        if: steps.v.outputs.build == 'true'
-        working-directory: ${{ runner.temp }}/mcp/scripts
-        run: npm i --prefix . --no-save --no-package-lock --no-audit --no-fund esbuild@0.28.2
-
+      # Skills only: the directory accepts MCP servers that run on the user's computer only
+      # from Verified organizations, and refused 2.15.2 for its bundled server. The full
+      # plugin installs from career-compass-mcp's own marketplace instead.
       - name: Build the bundle
         if: steps.v.outputs.build == 'true'
         env:
@@ -106,57 +103,25 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
           SHA: ${{ steps.src.outputs.sha }}
         run: |
-          node "$RUNNER_TEMP/mcp/scripts/build-plugin-bundle.mjs" "$VERSION"
+          node "$RUNNER_TEMP/mcp/scripts/build-plugin-skills.mjs" "$VERSION"
           # The script links the source as tree/v<version>. Point it at the commit instead,
           # which exists whether or not the release was tagged.
           sed -i "s#/tree/v$VERSION)#/tree/$SHA)#g" BUNDLE.md
           grep -q "/tree/$SHA)" BUNDLE.md
 
-      - name: Smoke-test the bundled server
+      - name: Check the bundle runs no local program
         if: steps.v.outputs.build == 'true'
         run: |
-          printf '%s\n' \
-            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
-            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-            '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-            | HOME="$RUNNER_TEMP/home" timeout 20 node server/build/src/index.js > "$RUNNER_TEMP/out.jsonl" || true
-          count=$(grep '"id":2' "$RUNNER_TEMP/out.jsonl" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).result.tools.length))')
-          echo "tools: $count"
-          test "$count" -eq 19
-          # Server instructions are what Claude Code loads at session start when tool search
-          # defers the tools, and it cuts them at 2,048 characters.
-          grep '"id":1' "$RUNNER_TEMP/out.jsonl" | node -e '
-            let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
-              const text = JSON.parse(s).result.instructions;
-              const n = typeof text === "string" ? text.trim().length : 0;
-              console.log(`instructions: ${n} chars`);
-              if (n === 0) { console.log("::error::initialize returned no server instructions"); process.exit(1); }
-              if (text.length > 2048) { console.log(`::error::server instructions are ${text.length} chars; Claude Code truncates at 2048`); process.exit(1); }
-            });'
-
-      # Since 2.15.2 the plugin declares no userConfig: the directory's policy scan read
-      # the data folder option as "uses a credential from the user's machine". Cowork also
-      # skips an MCP server whose userConfig option has no default, so any option that
-      # comes back must keep one.
-      - name: Check userConfig options keep a default and .mcp.json passes no env
-        if: steps.v.outputs.build == 'true'
-        run: |
+          if [ -e .mcp.json ] || [ -e server ]; then
+            echo "::error::the directory bundle must not ship .mcp.json or server/"
+            exit 1
+          fi
           node -e '
             const p = require("./.claude-plugin/plugin.json");
-            for (const [k, o] of Object.entries(p.userConfig || {})) {
-              if (typeof o.default !== "string" || o.default.trim() === "") {
-                console.log(`::error::plugin.json userConfig.${k} has no default`);
-                process.exit(1);
-              }
+            for (const k of ["mcpServers", "userConfig", "hooks", "lspServers"]) {
+              if (p[k]) { console.log(`::error::plugin.json declares ${k}`); process.exit(1); }
             }
-            const m = require("./.mcp.json");
-            for (const [name, srv] of Object.entries(m.mcpServers)) {
-              if (srv.env && Object.keys(srv.env).length) {
-                console.log(`::error::.mcp.json passes env to ${name}; the directory scan flags it`);
-                process.exit(1);
-              }
-            }
-            console.log(`userConfig options: ${Object.keys(p.userConfig || {}).length}; env: none`);'
+            console.log("no MCP server, userConfig, hooks or LSP servers");'
 
       # The same validator the directory runs. --strict fails on warnings too, such as an
       # unrecognized manifest field. Pinned so a CLI release can't change the verdict
@@ -183,4 +148,4 @@ jobs:
           git commit -m "Bundle career-compass-mcp $VERSION" -m "Source: benskamps/career-compass-mcp@$SHA (npm gitHead)"
           git push -u origin "bundle/v$VERSION"
           gh pr create --title "Bundle career-compass-mcp $VERSION" \
-            --body "Rebuilt server/ from career-compass-mcp@$VERSION on npm (source commit $SHA) with scripts/build-plugin-bundle.mjs from career-compass-mcp. See BUNDLE.md."
+            --body "Rebuilt the skills-only bundle from career-compass-mcp@$VERSION (source commit $SHA) with scripts/build-plugin-skills.mjs from career-compass-mcp. See BUNDLE.md."
