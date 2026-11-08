@@ -3,10 +3,6 @@ name: start
 description: Start here. Paste or attach your résumé and a job you're considering, and get an honest fit verdict, your top two gaps, and what to fix before you apply. Or ask to see a sample first.
 argument-hint: "[paste your résumé and a job posting, or leave blank]"
 disable-model-invocation: true
-# Read-only tools only (readOnlyHint: true); saving still asks every time.
-allowed-tools:
-  - mcp__plugin_career-compass_career-compass__check_setup
-  - mcp__plugin_career-compass_career-compass__ingest_document
 ---
 
 The user ran the Career Compass start command. Follow the career-compass skill's
@@ -20,12 +16,6 @@ The user ran the Career Compass start command. Follow the career-compass skill's
      their computer, even if you can see one or had started to; drop it and do the ask.
    - Don't say the tools didn't attach or that nothing gets saved. Chat mode's one clause
      about Claude Code or Cowork is the only mention.
-   - If you can read files on their computer and `~/.career-compass/career/` holds their
-     saved history, read it (read only) as their background instead of asking for a
-     résumé, and say so in a clause. Open `~/.career-compass/career/profile.yaml` and
-     `experience.yaml` by that exact path, with the `~` as written (the tool expands it),
-     not a home folder you guessed; don't search for the folder, since file searches skip
-     hidden folders. If it isn't there or the read fails, don't mention it.
    - If they say they built or work on Career Compass, they are still the job seeker
      here: no notes about installs, activation or how the plugin is doing.
 2. If they pasted a résumé and a posting, do the fit check: that is the start. If they
