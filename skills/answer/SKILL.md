@@ -3,9 +3,6 @@ name: answer
 description: Answer a job application form's questions from your real history, each within its character limit, without inflating years or guessing your eligibility answers.
 argument-hint: "[paste the form's questions, with any character limits]"
 disable-model-invocation: true
-# Read-only (readOnlyHint: true); saving a narrative answer still asks.
-allowed-tools:
-  - mcp__plugin_career-compass_career-compass__answer_application
 ---
 
 The user wants answers to an application form's questions. The questions are below.

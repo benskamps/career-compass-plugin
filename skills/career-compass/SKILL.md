@@ -1,17 +1,6 @@
 ---
 name: career-compass
 description: Use for any job-search or career task, even a casual ask with nothing pasted yet that never names Career Compass. Triggers include a job posting or JD, a résumé or CV, "should I apply", "do I fit this", "help me apply", tailoring a résumé or cover letter, a LinkedIn headline or About, tracking applications, a recruiter email, a follow-up, referral or thank-you message, interview prep or a specific interview question, questions to ask an interviewer, debriefing an interview, why applications or final rounds keep failing, a rejection or being ghosted, being laid off, what jobs fit their degree or background, whether a salary or offer is good, negotiating or a counter-offer, getting the job, job application form questions, finding openings, correcting an earlier answer or telling Career Compass's maker it got something wrong, not knowing where to start, asking what it does, or pasting a Career Compass card. Not for hiring-side work such as writing a job description or screening and interviewing candidates.
-# Read-only tools only (readOnlyHint: true), so a first answer needs no permission prompt.
-# Every tool that writes still asks.
-allowed-tools:
-  - mcp__plugin_career-compass_career-compass__check_setup
-  - mcp__plugin_career-compass_career-compass__pipeline_view
-  - mcp__plugin_career-compass_career-compass__explore_opportunity
-  - mcp__plugin_career-compass_career-compass__ingest_document
-  - mcp__plugin_career-compass_career-compass__prepare_interview
-  - mcp__plugin_career-compass_career-compass__evaluate_offer
-  - mcp__plugin_career-compass_career-compass__classify_email
-  - mcp__plugin_career-compass_career-compass__answer_application
 ---
 
 # Working with Career Compass
@@ -475,21 +464,7 @@ user carries their search to the next one: a short summary they keep and paste b
   was I?", a status update about a role you don't see), first use a Career Compass card in
   this project's files or instructions if there is one (the newest by its date). Else, if
   you have a tool that searches their past claude.ai conversations, search it for "Career
-  Compass card" and use the newest one you find, saying which chat it came from. Else, if
-  you have a tool that reads files on their computer (a folder they shared with you, a
-  filesystem connector), read `~/.career-compass/pipeline/applications.yaml` once: it is
-  the tracker Career Compass kept when they used it in Claude Code or Cowork. Pass that
-  exact path to your file-reading tool with the `~` as written (the tool expands it), not
-  a home folder you guessed, and don't search for it: file searches skip hidden folders.
-  Read only
-  that file (and `~/.career-compass/career/` if the ask needs their history), never write
-  to it or offer to update it from here (a change goes on the updated card), and don't
-  search other folders. Treat it like a pasted card, and if
-  nothing in it changed in the last two weeks, say the date it was last updated and ask
-  what has happened since before ranking stale statuses. Finding it doesn't mean they are
-  in Claude Code or Cowork, so still no setup talk. If the file isn't there, don't mention
-  trying. If the read fails or is refused, say so in one clause at most ("I couldn't open
-  your saved tracker"), with no ask to grant access and no retry. If none of these finds anything, say in one
+  Compass card" and use the newest one you find, saying which chat it came from. If none of these finds anything, say in one
   line that you can't see earlier chats from here and ask for the card or a quick list of
   their applications; that is the whole reply, with no setup talk.
 - **When a card is pasted** (or found), it is their history: the truth rule applies to it as to a
@@ -544,4 +519,4 @@ for your read). When the user mentions a status change, offer to record it with
 
 The user can also see the pipeline in a local dashboard. `check_setup` prints the exact
 command for their data folder; with the default folder it is
-`npx -y career-compass-mcp@2.16.0 dashboard`.
+`npx -y career-compass-mcp@2.16.1 dashboard`.
