@@ -147,8 +147,8 @@ is welcome in [Discussions](https://github.com/benskamps/career-compass-mcp/disc
 This version is skills only. It stores nothing and runs no program: what you paste goes to
 the Claude client you use, for the requests you make, and nowhere else.
 
-The full version (above) stores your career knowledge base and job pipeline as YAML in
-`~/.career-compass/` on your computer and sends that data nowhere on its own. Its server
+The full version (above) stores your career knowledge base and job pipeline as YAML in a
+Career Compass folder on your computer and sends that data nowhere on its own. Its server
 makes no network requests.
 
 The full policy,
@@ -158,8 +158,10 @@ covering collection, storage, sharing, retention, and contact details, is at
 
 ## Where your files live
 
-Nowhere, in this version. With the full version they are in `~/.career-compass/`, as plain
-YAML you can open, back up, or delete.
+Nowhere, in this version, unless you ask Claude to keep your Career Compass card as
+`career-compass-card.md` in your own working folder in Claude Code or Cowork. With the full
+version they are in a Career Compass folder on your computer, as plain YAML you can open,
+back up, or delete.
 
 ## What this plugin installs
 
